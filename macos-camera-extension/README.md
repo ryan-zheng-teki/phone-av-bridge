@@ -40,6 +40,19 @@ Then approve the camera extension in:
 
 After approval, restart capture apps and verify the camera appears in your app device list.
 
+## Unsigned release archive build (CI/public distribution)
+
+Use the helper script:
+
+```bash
+cd macos-camera-extension
+VERSION_SUFFIX=0.1.2 ./scripts/build-unsigned-release.sh
+```
+
+Output artifact:
+
+- `dist/PhoneAVBridgeCamera-macos-<version>-unsigned.zip`
+
 # links that can be useful
 
 

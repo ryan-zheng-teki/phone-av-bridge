@@ -3,6 +3,17 @@ plugins {
   id("org.jetbrains.kotlin.android")
 }
 
+val ciKeystorePath = System.getenv("ANDROID_KEYSTORE_PATH")
+val ciKeystorePassword = System.getenv("ANDROID_KEYSTORE_PASSWORD")
+val ciKeyAlias = System.getenv("ANDROID_KEY_ALIAS")
+val ciKeyPassword = System.getenv("ANDROID_KEY_PASSWORD")
+val ciReleaseSigningEnabled = listOf(
+  ciKeystorePath,
+  ciKeystorePassword,
+  ciKeyAlias,
+  ciKeyPassword,
+).all { !it.isNullOrBlank() }
+
 android {
   namespace = "org.autobyteus.phoneavbridge"
   compileSdk = 35
@@ -17,6 +28,17 @@ android {
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
+  signingConfigs {
+    if (ciReleaseSigningEnabled) {
+      create("ciRelease") {
+        storeFile = file(ciKeystorePath!!)
+        storePassword = ciKeystorePassword
+        keyAlias = ciKeyAlias
+        keyPassword = ciKeyPassword
+      }
+    }
+  }
+
   buildTypes {
     release {
       isMinifyEnabled = false
@@ -24,6 +46,9 @@ android {
         getDefaultProguardFile("proguard-android-optimize.txt"),
         "proguard-rules.pro",
       )
+      if (ciReleaseSigningEnabled) {
+        signingConfig = signingConfigs.getByName("ciRelease")
+      }
     }
   }
 

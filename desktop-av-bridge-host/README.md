@@ -132,6 +132,16 @@ npm run build:release
 Generated archives are stored under `dist/`.
 Each release run also prepares a local bundled Node runtime for the current build platform.
 
+Build Debian package (Ubuntu/Debian):
+
+```bash
+./scripts/build-deb-package.sh 0.1.2
+```
+
+Generated package:
+
+- `dist/phone-av-bridge-host_<version>_<arch>.deb`
+
 ## Installer scripts
 
 - Linux:

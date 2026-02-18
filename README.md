@@ -117,3 +117,30 @@ cd phone-av-camera-bridge-runtime
 cd desktop-av-bridge-host
 bash tests/docker/run_linux_container_e2e.sh
 ```
+
+## Tag-Based GitHub Releases
+
+This repository includes a release workflow at:
+
+- `.github/workflows/release.yml`
+
+Trigger a release by pushing a tag:
+
+```bash
+git tag v0.1.2
+git push origin v0.1.2
+```
+
+Published release assets:
+
+- Android APK (`release` if signing secrets are configured, otherwise `debug`)
+- macOS camera app archive (`PhoneAVBridgeCamera` unsigned zip)
+- Linux Debian package (`phone-av-bridge-host_<version>_<arch>.deb`)
+- `SHA256SUMS.txt`
+
+Optional Android signing secrets (GitHub repository secrets):
+
+- `ANDROID_KEYSTORE_B64`
+- `ANDROID_KEYSTORE_PASSWORD`
+- `ANDROID_KEY_ALIAS`
+- `ANDROID_KEY_PASSWORD`
