@@ -140,6 +140,85 @@ Published release assets:
 - Linux Debian package (`phone-av-bridge-host_<version>_<arch>.deb`)
 - `SHA256SUMS.txt`
 
+## End-User Installation Guides
+
+These steps are for non-developer users installing from GitHub Releases.
+
+### macOS (camera app + host app)
+
+1. Download these release assets:
+   - `PhoneAVBridgeCamera-macos-<version>-unsigned.zip`
+   - `PhoneAVBridge-<version>-android-*.apk`
+2. Install `PhoneAVBridgeCamera.app`:
+
+```bash
+VERSION="<release-version>"
+APP_ZIP="$HOME/Downloads/PhoneAVBridgeCamera-macos-${VERSION}-unsigned.zip"
+TMP_DIR="$(mktemp -d)"
+unzip -q "$APP_ZIP" -d "$TMP_DIR"
+sudo rm -rf /Applications/PhoneAVBridgeCamera.app
+sudo ditto "$TMP_DIR/PhoneAVBridgeCamera.app" /Applications/PhoneAVBridgeCamera.app
+sudo xattr -dr com.apple.quarantine /Applications/PhoneAVBridgeCamera.app
+open -a /Applications/PhoneAVBridgeCamera.app
+```
+
+3. Install the host service app (currently from this repo install script):
+
+```bash
+git clone https://github.com/ryan-zheng-teki/phone-av-bridge.git
+cd phone-av-bridge/desktop-av-bridge-host
+./installers/macos/install.command
+open "$HOME/Applications/Phone AV Bridge Host.app"
+```
+
+4. In macOS System Settings, approve camera extension:
+   - `System Settings -> General -> Login Items & Extensions -> Camera Extensions`
+5. Install the Android APK on phone and pair to host.
+6. In Zoom/Meet/FaceTime, select:
+   - Camera: `Phone AV Bridge Camera`
+   - Microphone: `PhoneAVBridgeAudio 2ch`
+
+If camera app keeps reopening after you close it, stop host first:
+
+```bash
+~/Applications/PhoneAVBridgeHost/stop.command
+```
+
+### Linux (Debian/Ubuntu host + Android APK)
+
+1. Download these release assets:
+   - `phone-av-bridge-host_<version>_amd64.deb`
+   - `PhoneAVBridge-<version>-android-*.apk`
+2. Install host package:
+
+```bash
+VERSION="<release-version>"
+sudo apt install -y "$HOME/Downloads/phone-av-bridge-host_${VERSION}_amd64.deb"
+```
+
+3. Start host:
+
+```bash
+phone-av-bridge-host-start
+```
+
+4. Install Android APK on phone and pair to host.
+5. In Zoom/Meet on Linux:
+   - Camera: select loopback camera device (compatibility mode) or userspace bridge source.
+   - Microphone: select `<Phone Name> Microphone`.
+
+Stop host:
+
+```bash
+phone-av-bridge-host-stop
+```
+
+Uninstall host:
+
+```bash
+sudo apt remove -y phone-av-bridge-host
+```
+
 Optional Android signing secrets (GitHub repository secrets):
 
 - `ANDROID_KEYSTORE_B64`
