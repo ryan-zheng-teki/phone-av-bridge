@@ -188,6 +188,17 @@ export class SessionController extends EventEmitter {
     return this.getStatus();
   }
 
+  async shutdownResources() {
+    await this.#disableAllResources();
+    this.state.connectionState = this.state.paired ? 'paired' : 'not_paired';
+    this.state.hostStatus = this.state.paired ? 'Paired' : 'Not Paired';
+    this.state.issues = [];
+    this.#refreshRouteHints();
+    this.state.updatedAt = new Date().toISOString();
+    this.emit('status', this.getStatus());
+    return this.getStatus();
+  }
+
   async applyResourceState(diff = {}) {
     const run = () => this.#applyResourceStateSerial(diff);
     // Keep the queue usable after failures by always scheduling the next task.

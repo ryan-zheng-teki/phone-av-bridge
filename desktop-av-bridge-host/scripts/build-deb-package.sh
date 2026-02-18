@@ -71,8 +71,50 @@ LOG_ROOT="${XDG_STATE_HOME:-${HOME}/.local/state}"
 LOG_DIR="${LOG_ROOT}/phone-av-bridge-host"
 PID_FILE="${LOG_DIR}/phone-av-bridge-host.pid"
 RUNTIME_NODE="${TARGET_DIR}/runtime/node/bin/node"
+SYSTEM_ENV_FILE="/etc/default/phone-av-bridge-host"
+USER_ENV_FILE="${XDG_CONFIG_HOME:-${HOME}/.config}/phone-av-bridge-host/env"
 
 mkdir -p "${LOG_DIR}"
+
+load_env_file() {
+  local env_file="$1"
+  if [[ -f "${env_file}" ]]; then
+    set -a
+    # shellcheck disable=SC1090
+    . "${env_file}"
+    set +a
+  fi
+}
+
+load_env_file "${SYSTEM_ENV_FILE}"
+load_env_file "${USER_ENV_FILE}"
+
+kill_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "${pid}" 2>/dev/null || true); do
+    kill_tree "${child}"
+  done
+  kill "${pid}" >/dev/null 2>&1 || true
+}
+
+cleanup_stale_media_workers() {
+  local bridge_pid
+  for bridge_pid in $(pgrep -f "${TARGET_DIR}/phone-av-camera-bridge-runtime/bin/run-bridge.sh" 2>/dev/null || true); do
+    kill_tree "${bridge_pid}"
+  done
+  local mic_pid
+  for mic_pid in $(pgrep -f 'ffmpeg .* -f pulse phone_av_bridge_mic_sink_' 2>/dev/null || true); do
+    kill "${mic_pid}" >/dev/null 2>&1 || true
+  done
+  if command -v pactl >/dev/null 2>&1; then
+    pactl list short modules 2>/dev/null | awk -F'\t' '/phone_av_bridge_mic_sink_|phone_av_bridge_mic_input_/ {print $1}' | while read -r module_id; do
+      if [[ -n "${module_id}" ]]; then
+        pactl unload-module "${module_id}" >/dev/null 2>&1 || true
+      fi
+    done
+  fi
+}
 
 if [[ -x "${RUNTIME_NODE}" ]] && "${RUNTIME_NODE}" --version >/dev/null 2>&1; then
   NODE_BIN="${RUNTIME_NODE}"
@@ -92,6 +134,8 @@ if [[ -f "${PID_FILE}" ]] && kill -0 "$(cat "${PID_FILE}")" >/dev/null 2>&1; the
   fi
   exit 0
 fi
+
+cleanup_stale_media_workers
 
 cd "${TARGET_DIR}"
 nohup "${NODE_BIN}" desktop-app/server.mjs >"${LOG_DIR}/phone-av-bridge-host.log" 2>&1 &
@@ -113,17 +157,75 @@ set -euo pipefail
 
 LOG_ROOT="${XDG_STATE_HOME:-${HOME}/.local/state}"
 PID_FILE="${LOG_ROOT}/phone-av-bridge-host/phone-av-bridge-host.pid"
+TARGET_DIR="/opt/phone-av-bridge-host"
+
+kill_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "${pid}" 2>/dev/null || true); do
+    kill_tree "${child}"
+  done
+  kill "${pid}" >/dev/null 2>&1 || true
+}
+
+cleanup_stale_media_workers() {
+  local bridge_pid
+  for bridge_pid in $(pgrep -f "${TARGET_DIR}/phone-av-camera-bridge-runtime/bin/run-bridge.sh" 2>/dev/null || true); do
+    kill_tree "${bridge_pid}"
+  done
+  local mic_pid
+  for mic_pid in $(pgrep -f 'ffmpeg .* -f pulse phone_av_bridge_mic_sink_' 2>/dev/null || true); do
+    kill "${mic_pid}" >/dev/null 2>&1 || true
+  done
+}
 
 if [[ ! -f "${PID_FILE}" ]]; then
+  cleanup_stale_media_workers
   exit 0
 fi
 
 PID="$(cat "${PID_FILE}")"
 if kill -0 "${PID}" >/dev/null 2>&1; then
-  kill "${PID}" >/dev/null 2>&1 || true
+  kill_tree "${PID}"
 fi
+cleanup_stale_media_workers
 rm -f "${PID_FILE}"
 STOPPER
+
+cat > "${USR_BIN_DIR}/phone-av-bridge-host-set-speaker-source" <<'SPEAKERCFG'
+#!/usr/bin/env bash
+set -euo pipefail
+
+CONFIG_FILE="/etc/default/phone-av-bridge-host"
+SOURCE_VALUE="${1:-}"
+
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  echo "Run with sudo: sudo phone-av-bridge-host-set-speaker-source <source|auto>" >&2
+  exit 1
+fi
+
+if [[ -z "${SOURCE_VALUE}" ]]; then
+  echo "Usage: sudo phone-av-bridge-host-set-speaker-source <source|auto>" >&2
+  echo "Example: sudo phone-av-bridge-host-set-speaker-source alsa_output.pci-0000_00_1f.3.analog-stereo.monitor" >&2
+  echo "Use 'auto' to clear override and use automatic safe selection." >&2
+  exit 1
+fi
+
+mkdir -p /etc/default
+touch "${CONFIG_FILE}"
+tmp_file="$(mktemp)"
+grep -v '^LINUX_SPEAKER_CAPTURE_SOURCE=' "${CONFIG_FILE}" > "${tmp_file}" || true
+
+if [[ "${SOURCE_VALUE}" != "auto" ]]; then
+  printf 'LINUX_SPEAKER_CAPTURE_SOURCE=%q\n' "${SOURCE_VALUE}" >> "${tmp_file}"
+  echo "Set LINUX_SPEAKER_CAPTURE_SOURCE=${SOURCE_VALUE} in ${CONFIG_FILE}"
+else
+  echo "Cleared LINUX_SPEAKER_CAPTURE_SOURCE override (auto mode)."
+fi
+
+install -m 0644 "${tmp_file}" "${CONFIG_FILE}"
+rm -f "${tmp_file}"
+SPEAKERCFG
 
 cat > "${USR_BIN_DIR}/phone-av-bridge-host-enable-camera" <<'CAMERAFIX'
 #!/usr/bin/env bash
@@ -145,7 +247,11 @@ modprobe v4l2loopback video_nr="${VIDEO_NR}" card_label="${CARD_LABEL}" exclusiv
 echo "v4l2loopback loaded at /dev/video${VIDEO_NR} with label ${CARD_LABEL}"
 CAMERAFIX
 
-chmod 0755 "${USR_BIN_DIR}/phone-av-bridge-host-start" "${USR_BIN_DIR}/phone-av-bridge-host-stop" "${USR_BIN_DIR}/phone-av-bridge-host-enable-camera"
+chmod 0755 \
+  "${USR_BIN_DIR}/phone-av-bridge-host-start" \
+  "${USR_BIN_DIR}/phone-av-bridge-host-stop" \
+  "${USR_BIN_DIR}/phone-av-bridge-host-set-speaker-source" \
+  "${USR_BIN_DIR}/phone-av-bridge-host-enable-camera"
 
 cat > "${DESKTOP_DIR}/phone-av-bridge-host.desktop" <<'DESKTOP'
 [Desktop Entry]
@@ -181,10 +287,21 @@ VIDEO_NR="${V4L2_VIDEO_NR:-2}"
 CARD_LABEL="${V4L2_CARD_LABEL:-AutoByteusPhoneCamera}"
 MODPROBE_CONF="/etc/modprobe.d/phone-av-bridge-v4l2loopback.conf"
 MODULES_LOAD_CONF="/etc/modules-load.d/phone-av-bridge-v4l2loopback.conf"
+DEFAULTS_FILE="/etc/default/phone-av-bridge-host"
 
 mkdir -p /etc/modprobe.d /etc/modules-load.d
 printf 'options v4l2loopback video_nr=%s card_label=%s exclusive_caps=0 max_buffers=2\n' "${VIDEO_NR}" "${CARD_LABEL}" > "${MODPROBE_CONF}" || true
 printf 'v4l2loopback\n' > "${MODULES_LOAD_CONF}" || true
+
+if [[ ! -f "${DEFAULTS_FILE}" ]]; then
+  cat > "${DEFAULTS_FILE}" <<'DEFAULTS'
+# Phone AV Bridge host defaults (optional overrides)
+LINUX_CAMERA_MODE=compatibility
+V4L2_DEVICE=/dev/video2
+# Optional: pin speaker capture source instead of automatic safe selection.
+# LINUX_SPEAKER_CAPTURE_SOURCE=alsa_output.pci-0000_00_1f.3.analog-stereo.monitor
+DEFAULTS
+fi
 
 if command -v modprobe >/dev/null 2>&1; then
   modprobe -r v4l2loopback || true

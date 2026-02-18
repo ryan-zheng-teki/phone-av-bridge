@@ -81,12 +81,15 @@ Then open `http://127.0.0.1:8787`.
   - userspace mode: host validates ingest/decode path without exposing a loopback webcam device.
 - Linux microphone path:
   - host audio adapter creates a per-phone Pulse/PipeWire null sink/source (name includes phone identity),
-  - host runs ffmpeg RTSP audio -> Pulse sink,
-  - meeting apps can select the generated source as microphone input (`Monitor of PhoneAVBridgeMic-<phone>-<id>`).
+  - host runs ffmpeg RTSP audio -> Pulse sink, then exposes a remapped virtual source for meeting apps,
+  - meeting apps can select the generated source as microphone input (`PhoneAVBridgeMicInput-<phone>-<id>`),
+  - fallback on unsupported hosts remains monitor-based (`Monitor of PhoneAVBridgeMic-<phone>-<id>`).
 - Linux speaker path:
   - host prefers default Pulse/PipeWire monitor source, but excludes bridge-owned microphone sources (`phone_av_bridge_mic_*`) to avoid mic-to-speaker loopback,
   - if no safe monitor exists, host falls back to other safe non-bridge sources; if none exist, speaker route reports unavailable,
-  - optional override: set `LINUX_SPEAKER_CAPTURE_SOURCE=<source-name>` to force a specific Pulse/PipeWire source,
+  - optional override:
+    - Debian install: set `LINUX_SPEAKER_CAPTURE_SOURCE=<source-name>` in `/etc/default/phone-av-bridge-host` or run `sudo phone-av-bridge-host-set-speaker-source <source-name>`,
+    - local installer: set `LINUX_SPEAKER_CAPTURE_SOURCE=<source-name>` in `~/.config/phone-av-bridge-host/env`,
   - Android app pulls this stream when `Enable Speaker` is toggled.
 - macOS microphone path:
   - host routes RTSP audio to `PhoneAVBridgeAudio 2ch`,
@@ -158,7 +161,9 @@ Generated package:
   - Debian package installs provide:
     - `phone-av-bridge-host-start`
     - `phone-av-bridge-host-stop`
+    - `phone-av-bridge-host-set-speaker-source` (sudo helper for persistent speaker capture source override)
     - `phone-av-bridge-host-enable-camera` (sudo helper to force-reload `v4l2loopback` after kernel/module changes)
+    - default config file: `/etc/default/phone-av-bridge-host`
   - uninstall: `installers/linux/uninstall.sh`
 - macOS:
   - run `installers/macos/install.command`

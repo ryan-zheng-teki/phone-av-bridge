@@ -11,6 +11,9 @@
 - Linux speaker route resolves capture source from default sink monitor first.
 - If default sink resolves to the bridge microphone sink (or if only bridge mic sources are present), speaker capture can include microphone path audio.
 - There is currently no explicit exclusion logic to prevent selecting bridge-owned microphone sources for speaker capture.
+- On PipeWire/Pulse, null-sink monitor sources are tagged as `device.class=monitor` (`media.class=Audio/Sink`), and Zoom can hide monitor-class inputs; remapped `Audio/Source` is more reliably visible.
+- Live process inspection showed multiple stale host media pipelines running concurrently (multiple `ffmpeg` RTSP->pulse/v4l2 processes and duplicate `module-null-sink`/`module-remap-source` entries), which explains doubled outgoing voice.
+- Current host startup/stop flow lacked guaranteed graceful adapter shutdown on process signals, allowing stale child media workers after restarts.
 
 ## Constraints
 - Must preserve manual override behavior via `LINUX_SPEAKER_CAPTURE_SOURCE`.

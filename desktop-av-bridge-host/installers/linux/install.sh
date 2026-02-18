@@ -7,6 +7,8 @@ TARGET_DIR="${HOME}/.local/share/phone-av-bridge-host"
 BIN_DIR="${HOME}/.local/bin"
 APP_DIR="${HOME}/.local/share/applications"
 LOG_DIR="${HOME}/.local/state/phone-av-bridge-host"
+USER_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/phone-av-bridge-host"
+USER_ENV_FILE="${USER_CONFIG_DIR}/env"
 RUNTIME_NODE="${TARGET_DIR}/runtime/node/bin/node"
 SYSTEM_NODE="$(command -v node || true)"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
@@ -21,7 +23,17 @@ else
 fi
 V4L2_DEVICE_DEFAULT="${V4L2_DEVICE_DEFAULT:-/dev/video${V4L2_VIDEO_NR}}"
 
-mkdir -p "${TARGET_DIR}" "${BIN_DIR}" "${APP_DIR}" "${LOG_DIR}"
+mkdir -p "${TARGET_DIR}" "${BIN_DIR}" "${APP_DIR}" "${LOG_DIR}" "${USER_CONFIG_DIR}"
+
+if [[ ! -f "${USER_ENV_FILE}" ]]; then
+  cat > "${USER_ENV_FILE}" <<EOF
+# Phone AV Bridge host defaults (optional overrides)
+LINUX_CAMERA_MODE=${LINUX_CAMERA_MODE_DEFAULT}
+V4L2_DEVICE=${V4L2_DEVICE_DEFAULT}
+# Optional: set speaker capture source explicitly instead of automatic safe selection.
+# LINUX_SPEAKER_CAPTURE_SOURCE=alsa_output.pci-0000_00_1f.3.analog-stereo.monitor
+EOF
+fi
 
 runtime_usable=0
 if [[ -x "${RUNTIME_NODE}" ]] && "${RUNTIME_NODE}" --version >/dev/null 2>&1; then
@@ -130,8 +142,45 @@ PID_FILE="${LOG_DIR}/phone-av-bridge-host.pid"
 RUNTIME_NODE="${TARGET_DIR}/runtime/node/bin/node"
 LINUX_CAMERA_MODE_DEFAULT="{{LINUX_CAMERA_MODE_DEFAULT}}"
 V4L2_DEVICE_DEFAULT="{{V4L2_DEVICE_DEFAULT}}"
+USER_ENV_FILE="${XDG_CONFIG_HOME:-${HOME}/.config}/phone-av-bridge-host/env"
 
 mkdir -p "${LOG_DIR}"
+
+if [[ -f "${USER_ENV_FILE}" ]]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "${USER_ENV_FILE}"
+  set +a
+fi
+
+kill_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "${pid}" 2>/dev/null || true); do
+    kill_tree "${child}"
+  done
+  kill "${pid}" >/dev/null 2>&1 || true
+}
+
+cleanup_stale_media_workers() {
+  local bridge_pid
+  for bridge_pid in $(pgrep -f "${TARGET_DIR}/phone-av-camera-bridge-runtime/bin/run-bridge.sh" 2>/dev/null || true); do
+    kill_tree "${bridge_pid}"
+  done
+
+  local mic_pid
+  for mic_pid in $(pgrep -f 'ffmpeg .* -f pulse phone_av_bridge_mic_sink_' 2>/dev/null || true); do
+    kill "${mic_pid}" >/dev/null 2>&1 || true
+  done
+
+  if command -v pactl >/dev/null 2>&1; then
+    pactl list short modules 2>/dev/null | awk -F'\t' '/phone_av_bridge_mic_sink_|phone_av_bridge_mic_input_/ {print $1}' | while read -r module_id; do
+      if [[ -n "${module_id}" ]]; then
+        pactl unload-module "${module_id}" >/dev/null 2>&1 || true
+      fi
+    done
+  fi
+}
 
 if [[ -x "${RUNTIME_NODE}" ]] && "${RUNTIME_NODE}" --version >/dev/null 2>&1; then
   NODE_BIN="${RUNTIME_NODE}"
@@ -151,6 +200,8 @@ if [[ -f "${PID_FILE}" ]] && kill -0 "$(cat "${PID_FILE}")" >/dev/null 2>&1; the
   fi
   exit 0
 fi
+
+cleanup_stale_media_workers
 
 cd "${TARGET_DIR}"
 "${NODE_BIN}" desktop-app/server.mjs >"${LOG_DIR}/phone-av-bridge-host.log" 2>&1 &
@@ -172,15 +223,38 @@ cat > "${BIN_DIR}/phone-av-bridge-host-stop" <<'STOPPER'
 #!/usr/bin/env bash
 set -euo pipefail
 PID_FILE="${HOME}/.local/state/phone-av-bridge-host/phone-av-bridge-host.pid"
+TARGET_DIR="${HOME}/.local/share/phone-av-bridge-host"
+
+kill_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "${pid}" 2>/dev/null || true); do
+    kill_tree "${child}"
+  done
+  kill "${pid}" >/dev/null 2>&1 || true
+}
+
+cleanup_stale_media_workers() {
+  local bridge_pid
+  for bridge_pid in $(pgrep -f "${TARGET_DIR}/phone-av-camera-bridge-runtime/bin/run-bridge.sh" 2>/dev/null || true); do
+    kill_tree "${bridge_pid}"
+  done
+  local mic_pid
+  for mic_pid in $(pgrep -f 'ffmpeg .* -f pulse phone_av_bridge_mic_sink_' 2>/dev/null || true); do
+    kill "${mic_pid}" >/dev/null 2>&1 || true
+  done
+}
 
 if [[ ! -f "${PID_FILE}" ]]; then
+  cleanup_stale_media_workers
   exit 0
 fi
 
 PID="$(cat "${PID_FILE}")"
 if kill -0 "${PID}" >/dev/null 2>&1; then
-  kill "${PID}" >/dev/null 2>&1 || true
+  kill_tree "${PID}"
 fi
+cleanup_stale_media_workers
 rm -f "${PID_FILE}"
 STOPPER
 chmod +x "${BIN_DIR}/phone-av-bridge-host-stop"
@@ -201,6 +275,7 @@ echo "Stop command: ${BIN_DIR}/phone-av-bridge-host-stop"
 echo "Uninstall script: ${TARGET_DIR}/installers/linux/uninstall.sh"
 echo "Camera mode default: ${LINUX_CAMERA_MODE_DEFAULT} (override with env LINUX_CAMERA_MODE)"
 echo "Camera compatibility label: ${V4L2_CARD_LABEL} (override with env V4L2_CARD_LABEL)"
+echo "Persistent user config: ${USER_ENV_FILE}"
 runtime_usable=0
 if [[ -x "${RUNTIME_NODE}" ]] && "${RUNTIME_NODE}" --version >/dev/null 2>&1; then
   runtime_usable=1

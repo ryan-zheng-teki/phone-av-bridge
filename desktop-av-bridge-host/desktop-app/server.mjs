@@ -378,11 +378,23 @@ export async function startServer({
     });
   }
 
+  let closed = false;
   return {
     host,
     port,
     bootstrap,
     close: async () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      if (controller?.shutdownResources) {
+        try {
+          await controller.shutdownResources();
+        } catch (error) {
+          console.error(`resource shutdown failed: ${error.message}`);
+        }
+      }
       if (discoverySocket) {
         await new Promise((resolve) => discoverySocket.close(() => resolve()));
       }
@@ -404,6 +416,30 @@ if (import.meta.url === `file://${process.argv[1]}`) {
 
   startServer({ host, port, advertisedHost, useMockAdapters, enableDiscovery, discoveryPort })
     .then((app) => {
+      let shuttingDown = false;
+      const shutdown = async (signal) => {
+        if (shuttingDown) {
+          return;
+        }
+        shuttingDown = true;
+        try {
+          await app.close();
+          console.log(`phone-av-bridge-host shutdown complete (${signal})`);
+          process.exit(0);
+        } catch (error) {
+          console.error(`phone-av-bridge-host shutdown failed (${signal}): ${error.message}`);
+          process.exit(1);
+        }
+      };
+      process.on('SIGINT', () => {
+        void shutdown('SIGINT');
+      });
+      process.on('SIGTERM', () => {
+        void shutdown('SIGTERM');
+      });
+      process.on('SIGHUP', () => {
+        void shutdown('SIGHUP');
+      });
       console.log(`phone-av-bridge-host running at ${app.bootstrap.baseUrl} (mock=${useMockAdapters})`);
       console.log(`pairing code: ${app.bootstrap.pairingCode}`);
       if (enableDiscovery) {
