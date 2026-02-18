@@ -8,9 +8,23 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, '../../..');
 
+function resolveDefaultScriptPath() {
+  const candidates = [
+    path.join(repoRoot, 'phone-av-camera-bridge-runtime/bin/run-bridge.sh'),
+    path.resolve(__dirname, '../../phone-av-camera-bridge-runtime/bin/run-bridge.sh'),
+    path.resolve(process.cwd(), 'phone-av-camera-bridge-runtime/bin/run-bridge.sh'),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) {
+      return candidate;
+    }
+  }
+  return candidates[0];
+}
+
 export class LinuxCameraBridgeRunner {
   constructor(options = {}) {
-    this.scriptPath = options.scriptPath ?? path.join(repoRoot, 'phone-av-camera-bridge-runtime/bin/run-bridge.sh');
+    this.scriptPath = options.scriptPath ?? resolveDefaultScriptPath();
     this.streamUrl = options.streamUrl ?? process.env.STREAM_SOURCE_URL ?? '';
     this.cameraMode = (options.cameraMode ?? process.env.LINUX_CAMERA_MODE ?? 'compatibility').toLowerCase();
     this.v4l2Device = options.v4l2Device ?? process.env.V4L2_DEVICE ?? '/dev/video2';
@@ -104,13 +118,41 @@ export class LinuxCameraBridgeRunner {
     this.activeStreamUrl = '';
 
     await new Promise((resolve) => {
-      active.once('exit', () => resolve());
-      active.kill('SIGTERM');
-      setTimeout(() => {
-        if (!active.killed) {
-          active.kill('SIGKILL');
+      let forceKillTimer = null;
+      let settleTimer = null;
+      let finished = false;
+
+      const finish = () => {
+        if (finished) {
+          return;
+        }
+        finished = true;
+        if (forceKillTimer) clearTimeout(forceKillTimer);
+        if (settleTimer) clearTimeout(settleTimer);
+        active.removeListener('exit', finish);
+        resolve();
+      };
+
+      active.once('exit', finish);
+
+      try {
+        active.kill('SIGTERM');
+      } catch {
+        finish();
+        return;
+      }
+
+      forceKillTimer = setTimeout(() => {
+        if (active.exitCode === null) {
+          try {
+            active.kill('SIGKILL');
+          } catch {
+          }
         }
       }, 1000);
+
+      // Prevent indefinite hangs if child process ignores termination signals.
+      settleTimer = setTimeout(finish, 3000);
     });
   }
 

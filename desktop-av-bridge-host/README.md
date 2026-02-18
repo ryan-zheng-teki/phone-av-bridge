@@ -82,7 +82,7 @@ Then open `http://127.0.0.1:8787`.
 - Linux microphone path:
   - host audio adapter creates a per-phone Pulse/PipeWire null sink/source (name includes phone identity),
   - host runs ffmpeg RTSP audio -> Pulse sink,
-  - meeting apps can select the generated virtual source as microphone input.
+  - meeting apps can select the generated source as microphone input (`Monitor of PhoneAVBridgeMic-<phone>-<id>`).
 - Linux speaker path:
   - host captures default Pulse/PipeWire monitor source and exposes raw PCM at `/api/speaker/stream`,
   - Android app pulls this stream when `Enable Speaker` is toggled.
@@ -114,6 +114,7 @@ Then open `http://127.0.0.1:8787`.
 - PulseAudio or PipeWire with `pactl` available for microphone virtual routing.
 - For webcam device exposure in meeting apps:
   - `LINUX_CAMERA_MODE=compatibility` and `v4l2loopback` module loaded with writable target (default `/dev/video2`).
+  - default camera card label is `AutoByteusPhoneCamera` to simplify app-side selection.
   - installer can auto-provision compatibility packages/module; override with `INSTALL_COMPAT_CAMERA=0` for userspace-only setup.
 
 ## macOS prerequisites for real meeting-app use
@@ -150,7 +151,12 @@ Generated package:
     - `INSTALL_COMPAT_CAMERA=0` to skip loopback camera dependency install.
     - `LINUX_CAMERA_MODE_DEFAULT=userspace|compatibility|auto` to choose startup default.
     - `V4L2_DEVICE_DEFAULT=/dev/videoN` to set preferred compatibility device.
+    - `V4L2_CARD_LABEL=YourCameraLabel` to set visible camera name in meeting apps.
   - app launcher name: `Phone AV Bridge Host`
+  - Debian package installs provide:
+    - `phone-av-bridge-host-start`
+    - `phone-av-bridge-host-stop`
+    - `phone-av-bridge-host-enable-camera` (sudo helper to force-reload `v4l2loopback` after kernel/module changes)
   - uninstall: `installers/linux/uninstall.sh`
 - macOS:
   - run `installers/macos/install.command`

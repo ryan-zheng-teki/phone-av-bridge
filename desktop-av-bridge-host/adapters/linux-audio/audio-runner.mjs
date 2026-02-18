@@ -33,8 +33,9 @@ export class LinuxAudioRunner {
     this.deviceId = 'default';
     this.micSinkName = 'phone_av_bridge_mic_sink_default';
     this.micSourceName = 'phone_av_bridge_mic_source_default';
-    this.micSinkDescription = 'Phone_Mic_Output';
-    this.micSourceDescription = 'Phone_Mic';
+    this.micSinkDescription = 'PhoneAVBridgeMic-phone-default';
+    this.micSourceDescription = 'PhoneAVBridgeMicSource-phone-default';
+    this.micSelectionTarget = 'Monitor of PhoneAVBridgeMic-phone-default';
     this.activeRouteKey = '';
     this.speakerCaptureProcess = null;
     this.speakerClients = new Set();
@@ -60,7 +61,7 @@ export class LinuxAudioRunner {
 
   getMicrophoneDeviceName() {
     const labels = buildDeviceNames(this.deviceName, {
-      microphoneTarget: this.micSourceDescription.replace(/_/g, ' '),
+      microphoneTarget: this.micSelectionTarget,
     });
     return labels.microphone;
   }
@@ -397,11 +398,13 @@ export class LinuxAudioRunner {
   #rebuildRouteIdentity() {
     const nameSlug = slugify(this.deviceName, 'phone');
     const idSlug = compactId(this.deviceId, 'default');
+    const nameToken = nameSlug.replace(/_/g, '-').slice(0, 24) || 'phone';
+    const idToken = idSlug.slice(-6) || 'default';
     this.micSinkName = `phone_av_bridge_mic_sink_${nameSlug}_${idSlug}`.slice(0, 63);
     this.micSourceName = `phone_av_bridge_mic_src_${nameSlug}_${idSlug}`.slice(0, 63);
-    const baseDescription = `${this.deviceName.slice(0, 32)} Mic`;
-    this.micSinkDescription = `${baseDescription} Output`.replace(/\s+/g, '_');
-    this.micSourceDescription = baseDescription.replace(/\s+/g, '_');
+    this.micSinkDescription = `PhoneAVBridgeMic-${nameToken}-${idToken}`;
+    this.micSourceDescription = `PhoneAVBridgeMicSource-${nameToken}-${idToken}`;
+    this.micSelectionTarget = `Monitor of ${this.micSinkDescription}`;
   }
 }
 

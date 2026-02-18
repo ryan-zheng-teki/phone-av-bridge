@@ -75,13 +75,14 @@ cd android-phone-av-bridge
 3. Install Android APK and open `Phone AV Bridge`.
 4. Tap `Pair Host`, then enable `Camera`, `Microphone`, and/or `Speaker`.
 5. In Zoom/meeting app on Linux:
-   - in compatibility mode, select the loopback camera device,
-   - select the virtual mic source named `<Phone Name> Microphone`,
+   - in compatibility mode, select camera device `AutoByteusPhoneCamera`,
+   - select the virtual mic source matching `Monitor of PhoneAVBridgeMic-<phone>-<id>`,
    - for phone speaker playback, ensure host output is available on the default Pulse/PipeWire sink monitor.
 
 Notes:
 - Camera/mic media is sent from Android via in-app RTSP server.
 - Android publishes RTSP endpoint as LAN IPv4 (`rtsp://<phone-lan-ip>:1935/`) for host reachability.
+- Debian package install (`dpkg -i`) auto-configures persistent `v4l2loopback` loading for compatibility mode.
 - Linux camera mode controls:
   - `LINUX_CAMERA_MODE=compatibility`
   - `LINUX_CAMERA_MODE=userspace`

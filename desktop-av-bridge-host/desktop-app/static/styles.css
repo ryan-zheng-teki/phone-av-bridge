@@ -26,6 +26,12 @@ body {
   margin-top: -8px;
 }
 
+.section-note {
+  margin: 4px 0 8px 0;
+  color: #4f647b;
+  font-size: 13px;
+}
+
 .card {
   background: var(--card);
   border: 1px solid #d1deec;
@@ -49,6 +55,49 @@ input[type="text"] {
 label {
   display: block;
   margin: 8px 0;
+}
+
+.resource-list {
+  display: grid;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.resource-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  background: #eef5fc;
+  border: 1px solid #d1deec;
+  border-radius: 8px;
+  padding: 10px 12px;
+}
+
+.status-chip {
+  display: inline-block;
+  min-width: 92px;
+  text-align: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #ffffff;
+}
+
+.chip-active {
+  background: #1f9d55;
+}
+
+.chip-off {
+  background: #5f6f82;
+}
+
+.chip-unavailable {
+  background: #8f9aab;
+}
+
+.chip-issue {
+  background: #d97706;
 }
 
 button {

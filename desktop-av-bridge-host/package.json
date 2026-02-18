@@ -11,7 +11,8 @@
     "test:docker:linux-e2e": "bash tests/docker/run_linux_container_e2e.sh",
     "test:macos:e2e": "bash tests/macos/run_macos_audio_e2e.sh",
     "prepare:runtime": "node scripts/prepare-runtime.mjs",
-    "build:release": "node scripts/build-release.mjs"
+    "build:release": "node scripts/build-release.mjs",
+    "build:deb": "node scripts/build-deb.mjs"
   },
   "engines": {
     "node": ">=20"

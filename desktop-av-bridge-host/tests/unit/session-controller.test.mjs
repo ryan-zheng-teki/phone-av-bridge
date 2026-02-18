@@ -264,3 +264,17 @@ test('camera lens and orientation metadata are tracked in status', async () => {
   assert.equal(status.phoneCamera.lens, 'back');
   assert.equal(status.phoneCamera.orientationMode, 'landscape_lock');
 });
+
+test('failed unpaired apply does not poison later queued applies after pairing', async () => {
+  const { controller } = buildController();
+
+  await assert.rejects(
+    controller.applyResourceState({ camera: true }),
+    /Host is not paired\. Pair first\./
+  );
+
+  await controller.pairHost('PAIR-9999');
+  const status = await controller.applyResourceState({ camera: true });
+  assert.equal(status.resources.camera, true);
+  assert.equal(status.hostStatus, 'Resource Active');
+});

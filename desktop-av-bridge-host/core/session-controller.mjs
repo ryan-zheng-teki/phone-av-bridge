@@ -189,11 +189,9 @@ export class SessionController extends EventEmitter {
   }
 
   async applyResourceState(diff = {}) {
-    this.applyQueue = this.applyQueue
-      .then(() => this.#applyResourceStateSerial(diff))
-      .catch((error) => {
-        throw error;
-      });
+    const run = () => this.#applyResourceStateSerial(diff);
+    // Keep the queue usable after failures by always scheduling the next task.
+    this.applyQueue = this.applyQueue.then(run, run);
     return this.applyQueue;
   }
 

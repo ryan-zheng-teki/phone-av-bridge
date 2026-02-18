@@ -12,6 +12,7 @@ SYSTEM_NODE="$(command -v node || true)"
 AUTO_INSTALL_DEPS="${AUTO_INSTALL_DEPS:-1}"
 INSTALL_COMPAT_CAMERA="${INSTALL_COMPAT_CAMERA:-1}"
 V4L2_VIDEO_NR="${V4L2_VIDEO_NR:-2}"
+V4L2_CARD_LABEL="${V4L2_CARD_LABEL:-AutoByteusPhoneCamera}"
 
 if [[ "${INSTALL_COMPAT_CAMERA}" == "1" ]]; then
   LINUX_CAMERA_MODE_DEFAULT="${LINUX_CAMERA_MODE_DEFAULT:-compatibility}"
@@ -71,9 +72,11 @@ configure_v4l2_compatibility() {
     return 0
   fi
 
-  sudo modprobe v4l2loopback "video_nr=${V4L2_VIDEO_NR}" card_label="PhoneResourceCamera" exclusive_caps=1 || true
+  # Reload to ensure updated module parameters are actually applied.
+  sudo modprobe -r v4l2loopback || true
+  sudo modprobe v4l2loopback "video_nr=${V4L2_VIDEO_NR}" card_label="${V4L2_CARD_LABEL}" exclusive_caps=0 max_buffers=2 || true
   if [[ -d /etc/modprobe.d ]]; then
-    printf 'options v4l2loopback video_nr=%s card_label=PhoneResourceCamera exclusive_caps=1\n' "${V4L2_VIDEO_NR}" \
+    printf 'options v4l2loopback video_nr=%s card_label=%s exclusive_caps=0 max_buffers=2\n' "${V4L2_VIDEO_NR}" "${V4L2_CARD_LABEL}" \
       | sudo tee /etc/modprobe.d/phone-av-bridge-v4l2loopback.conf >/dev/null || true
   fi
 }
@@ -97,6 +100,19 @@ else
   rm -rf "${TARGET_DIR}"
   mkdir -p "${TARGET_DIR}"
   cp -a "${PROJECT_ROOT}/." "${TARGET_DIR}/"
+fi
+
+BRIDGE_RUNTIME_SOURCE="$(cd "${PROJECT_ROOT}/.." && pwd)/phone-av-camera-bridge-runtime"
+if [[ -d "${BRIDGE_RUNTIME_SOURCE}" ]]; then
+  if command -v rsync >/dev/null 2>&1; then
+    rsync -a --delete "${BRIDGE_RUNTIME_SOURCE}/" "${TARGET_DIR}/phone-av-camera-bridge-runtime/"
+  else
+    rm -rf "${TARGET_DIR}/phone-av-camera-bridge-runtime"
+    mkdir -p "${TARGET_DIR}/phone-av-camera-bridge-runtime"
+    cp -a "${BRIDGE_RUNTIME_SOURCE}/." "${TARGET_DIR}/phone-av-camera-bridge-runtime/"
+  fi
+else
+  echo "Warning: ${BRIDGE_RUNTIME_SOURCE} not found. Linux camera bridge runtime was not bundled." >&2
 fi
 
 if [[ "${runtime_usable}" -ne 1 && -z "${SYSTEM_NODE}" ]]; then
@@ -184,6 +200,7 @@ echo "Start command: ${BIN_DIR}/phone-av-bridge-host-start"
 echo "Stop command: ${BIN_DIR}/phone-av-bridge-host-stop"
 echo "Uninstall script: ${TARGET_DIR}/installers/linux/uninstall.sh"
 echo "Camera mode default: ${LINUX_CAMERA_MODE_DEFAULT} (override with env LINUX_CAMERA_MODE)"
+echo "Camera compatibility label: ${V4L2_CARD_LABEL} (override with env V4L2_CARD_LABEL)"
 runtime_usable=0
 if [[ -x "${RUNTIME_NODE}" ]] && "${RUNTIME_NODE}" --version >/dev/null 2>&1; then
   runtime_usable=1

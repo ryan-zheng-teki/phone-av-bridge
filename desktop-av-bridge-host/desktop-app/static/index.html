@@ -9,10 +9,11 @@
   <body>
     <main class="container">
       <h1>Phone AV Bridge Host</h1>
-      <p class="subtitle">Pair once, then toggle phone resources.</p>
+      <p class="subtitle">Pair once, then manage resources from the Android app.</p>
 
       <section class="card">
         <h2>Status</h2>
+        <p class="section-note">Auto-refreshes every 2 seconds.</p>
         <div id="statusText">Loading...</div>
         <div id="phoneText">Phone: none</div>
         <div id="capabilitiesText">Capabilities: loading...</div>
@@ -31,11 +32,22 @@
       </section>
 
       <section class="card">
-        <h2>Resources</h2>
-        <label><input id="cameraToggle" type="checkbox" /> Camera</label>
-        <label><input id="micToggle" type="checkbox" /> Microphone</label>
-        <label><input id="speakerToggle" type="checkbox" /> Speaker</label>
-        <button id="applyBtn">Apply</button>
+        <h2>Resources (Read-only)</h2>
+        <p class="section-note">Controls are owned by the Android phone app.</p>
+        <div class="resource-list">
+          <div class="resource-row">
+            <span>Camera</span>
+            <span id="cameraStatusChip" class="status-chip">Unknown</span>
+          </div>
+          <div class="resource-row">
+            <span>Microphone</span>
+            <span id="micStatusChip" class="status-chip">Unknown</span>
+          </div>
+          <div class="resource-row">
+            <span>Speaker</span>
+            <span id="speakerStatusChip" class="status-chip">Unknown</span>
+          </div>
+        </div>
       </section>
 
       <section class="card">

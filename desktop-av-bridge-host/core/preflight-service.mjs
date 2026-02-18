@@ -33,6 +33,23 @@ async function pathExists(path) {
   }
 }
 
+async function readTextFile(path) {
+  try {
+    return (await fs.readFile(path, 'utf8')).trim();
+  } catch {
+    return null;
+  }
+}
+
+function parseVideoDeviceNumber(devicePath) {
+  const match = String(devicePath || '').match(/\/dev\/video(\d+)$/);
+  if (!match) {
+    return null;
+  }
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
 async function listAvfoundationVideoDevices() {
   let stderr = '';
   try {
@@ -175,6 +192,40 @@ export async function runPreflight(platform = process.platform) {
         v4l2Status === 'warn' ? 'Enable compatibility camera mode and install/load v4l2loopback for webcam exposure.' : null
       )
     );
+
+    if (!userspaceMode && v4l2Required && v4l2loopbackLoaded) {
+      const targetVideoNr = parseVideoDeviceNumber(v4l2Device);
+      const videoNrRaw = await readTextFile('/sys/module/v4l2loopback/parameters/video_nr');
+      const exclusiveCapsRaw = await readTextFile('/sys/module/v4l2loopback/parameters/exclusive_caps');
+      const videoSlots = (videoNrRaw || '').split(',').map((item) => item.trim()).filter(Boolean);
+      const capSlots = (exclusiveCapsRaw || '').split(',').map((item) => item.trim().toUpperCase()).filter(Boolean);
+
+      let exclusiveCapForTarget = null;
+      if (targetVideoNr !== null && videoSlots.length > 0 && capSlots.length > 0) {
+        const slotIndex = videoSlots.findIndex((item) => item === String(targetVideoNr));
+        if (slotIndex >= 0 && slotIndex < capSlots.length) {
+          exclusiveCapForTarget = capSlots[slotIndex];
+        }
+      }
+
+      const capsStatus = exclusiveCapForTarget === 'N' ? 'pass' : 'warn';
+      const capsDetail = exclusiveCapForTarget === 'N'
+        ? `v4l2loopback compatibility flags are valid for ${v4l2Device} (exclusive_caps=0).`
+        : exclusiveCapForTarget === 'Y'
+          ? `v4l2loopback exclusive mode is enabled for ${v4l2Device}; some meeting apps may hide this camera.`
+          : `Could not confirm v4l2loopback exclusive mode for ${v4l2Device}.`;
+      checks.push(
+        checkResult(
+          'linux_v4l2loopback_caps',
+          'Linux virtual camera compatibility flags',
+          capsStatus,
+          capsDetail,
+          capsStatus === 'warn'
+            ? 'Reload v4l2loopback with exclusive_caps=0 (example: modprobe v4l2loopback video_nr=2 card_label=AutoByteusPhoneCamera exclusive_caps=0 max_buffers=2).'
+            : null
+        )
+      );
+    }
 
     const pactlOk = await commandExists('pactl');
     const pwCliOk = await commandExists('pw-cli');

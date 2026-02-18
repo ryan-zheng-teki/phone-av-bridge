@@ -11,6 +11,8 @@ async function api(path, method = 'GET', body) {
   return payload;
 }
 
+let refreshPromise = null;
+
 async function loadBootstrap() {
   const payload = await api('/api/bootstrap');
   const codeInput = document.getElementById('pairCode');
@@ -39,20 +41,57 @@ function renderStatus(status) {
   issuesText.textContent = issues.length === 0
     ? 'Issues: none'
     : `Issues:\n${issues.map((issue) => `- ${issue.resource}: ${issue.message}`).join('\n')}`;
+  updateResourceChip('cameraStatusChip', evaluateResourceStatus({
+    available: capabilities.camera,
+    active: !!status.resources.camera,
+    hasIssue: issues.some((issue) => issue.resource === 'camera'),
+  }));
+  updateResourceChip('micStatusChip', evaluateResourceStatus({
+    available: capabilities.microphone,
+    active: !!status.resources.microphone,
+    hasIssue: issues.some((issue) => issue.resource === 'microphone'),
+  }));
+  updateResourceChip('speakerStatusChip', evaluateResourceStatus({
+    available: capabilities.speaker,
+    active: !!status.resources.speaker,
+    hasIssue: issues.some((issue) => issue.resource === 'speaker'),
+  }));
+}
 
-  document.getElementById('cameraToggle').checked = !!status.resources.camera;
-  document.getElementById('micToggle').checked = !!status.resources.microphone;
-  document.getElementById('speakerToggle').checked = !!status.resources.speaker;
-  document.getElementById('cameraToggle').disabled = !capabilities.camera;
-  document.getElementById('micToggle').disabled = !capabilities.microphone;
-  document.getElementById('speakerToggle').disabled = !capabilities.speaker;
+function evaluateResourceStatus({ available, active, hasIssue }) {
+  if (!available) {
+    return { label: 'Unavailable', className: 'chip-unavailable' };
+  }
+  if (hasIssue) {
+    return { label: 'Issue', className: 'chip-issue' };
+  }
+  if (active) {
+    return { label: 'Active', className: 'chip-active' };
+  }
+  return { label: 'Off', className: 'chip-off' };
+}
+
+function updateResourceChip(chipId, state) {
+  const chip = document.getElementById(chipId);
+  chip.textContent = state.label;
+  chip.className = `status-chip ${state.className}`;
 }
 
 async function refresh() {
+  if (refreshPromise) {
+    return refreshPromise;
+  }
+  refreshPromise = (async () => {
   const payload = await api('/api/status');
   renderStatus(payload.status);
   if (payload.preflight) {
     document.getElementById('preflightOut').textContent = JSON.stringify(payload.preflight, null, 2);
+  }
+  })();
+  try {
+    await refreshPromise;
+  } finally {
+    refreshPromise = null;
   }
 }
 
@@ -70,21 +109,25 @@ async function setup() {
     await refresh();
   });
 
-  document.getElementById('applyBtn').addEventListener('click', async () => {
-    await api('/api/toggles', 'POST', {
-      camera: document.getElementById('cameraToggle').checked,
-      microphone: document.getElementById('micToggle').checked,
-      speaker: document.getElementById('speakerToggle').checked,
-    });
-    await refresh();
-  });
-
   document.getElementById('preflightBtn').addEventListener('click', async () => {
     const payload = await api('/api/preflight', 'POST');
     document.getElementById('preflightOut').textContent = JSON.stringify(payload.preflight, null, 2);
   });
 
   await refresh();
+
+  setInterval(() => {
+    refresh().catch((error) => {
+      document.getElementById('statusText').textContent = `Status refresh error: ${error.message}`;
+    });
+  }, 2000);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    refresh().catch((error) => {
+      document.getElementById('statusText').textContent = `Status refresh error: ${error.message}`;
+    });
+  });
 }
 
 setup().catch((error) => {
