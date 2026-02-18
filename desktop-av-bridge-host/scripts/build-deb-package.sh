@@ -3,6 +3,7 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+REPO_ROOT="$(cd "${PROJECT_ROOT}/.." && pwd)"
 DIST_DIR="${PROJECT_ROOT}/dist"
 PACKAGE_NAME="phone-av-bridge-host"
 
@@ -37,6 +38,7 @@ PAYLOAD_ROOT="${PKG_ROOT}/opt/phone-av-bridge-host"
 DEBIAN_DIR="${PKG_ROOT}/DEBIAN"
 USR_BIN_DIR="${PKG_ROOT}/usr/bin"
 DESKTOP_DIR="${PKG_ROOT}/usr/share/applications"
+BRIDGE_RUNTIME_SOURCE="${REPO_ROOT}/phone-av-camera-bridge-runtime"
 
 cleanup() {
   rm -rf "${WORK_DIR}"
@@ -52,6 +54,13 @@ echo "Staging package payload..."
 for item in package.json README.md core adapters desktop-app installers scripts runtime; do
   cp -a "${PROJECT_ROOT}/${item}" "${PAYLOAD_ROOT}/"
 done
+
+if [[ -d "${BRIDGE_RUNTIME_SOURCE}" ]]; then
+  cp -a "${BRIDGE_RUNTIME_SOURCE}" "${PAYLOAD_ROOT}/phone-av-camera-bridge-runtime"
+else
+  echo "Missing bridge runtime directory: ${BRIDGE_RUNTIME_SOURCE}" >&2
+  exit 1
+fi
 
 cat > "${USR_BIN_DIR}/phone-av-bridge-host-start" <<'LAUNCHER'
 #!/usr/bin/env bash
@@ -73,6 +82,9 @@ else
   echo "Phone AV Bridge Host cannot start because Node.js runtime is unavailable." >&2
   exit 1
 fi
+
+export LINUX_CAMERA_MODE="${LINUX_CAMERA_MODE:-compatibility}"
+export V4L2_DEVICE="${V4L2_DEVICE:-/dev/video2}"
 
 if [[ -f "${PID_FILE}" ]] && kill -0 "$(cat "${PID_FILE}")" >/dev/null 2>&1; then
   if command -v xdg-open >/dev/null 2>&1; then
@@ -113,7 +125,27 @@ fi
 rm -f "${PID_FILE}"
 STOPPER
 
-chmod 0755 "${USR_BIN_DIR}/phone-av-bridge-host-start" "${USR_BIN_DIR}/phone-av-bridge-host-stop"
+cat > "${USR_BIN_DIR}/phone-av-bridge-host-enable-camera" <<'CAMERAFIX'
+#!/usr/bin/env bash
+set -euo pipefail
+
+VIDEO_NR="${V4L2_VIDEO_NR:-2}"
+CARD_LABEL="${V4L2_CARD_LABEL:-AutoByteusPhoneCamera}"
+
+if [[ "${EUID:-$(id -u)}" -ne 0 ]]; then
+  echo "Run with sudo: sudo phone-av-bridge-host-enable-camera" >&2
+  exit 1
+fi
+
+mkdir -p /etc/modprobe.d /etc/modules-load.d
+printf 'options v4l2loopback video_nr=%s card_label=%s exclusive_caps=0 max_buffers=2\n' "${VIDEO_NR}" "${CARD_LABEL}" > /etc/modprobe.d/phone-av-bridge-v4l2loopback.conf
+printf 'v4l2loopback\n' > /etc/modules-load.d/phone-av-bridge-v4l2loopback.conf
+modprobe -r v4l2loopback || true
+modprobe v4l2loopback video_nr="${VIDEO_NR}" card_label="${CARD_LABEL}" exclusive_caps=0 max_buffers=2
+echo "v4l2loopback loaded at /dev/video${VIDEO_NR} with label ${CARD_LABEL}"
+CAMERAFIX
+
+chmod 0755 "${USR_BIN_DIR}/phone-av-bridge-host-start" "${USR_BIN_DIR}/phone-av-bridge-host-stop" "${USR_BIN_DIR}/phone-av-bridge-host-enable-camera"
 
 cat > "${DESKTOP_DIR}/phone-av-bridge-host.desktop" <<'DESKTOP'
 [Desktop Entry]
@@ -140,6 +172,37 @@ Description: Phone AV Bridge desktop host
  Linux and macOS host orchestrator for phone camera, microphone, and speaker bridging.
  Includes local web host UI/API and launchers.
 CONTROL
+
+cat > "${DEBIAN_DIR}/postinst" <<'POSTINST'
+#!/usr/bin/env bash
+set -euo pipefail
+
+VIDEO_NR="${V4L2_VIDEO_NR:-2}"
+CARD_LABEL="${V4L2_CARD_LABEL:-AutoByteusPhoneCamera}"
+MODPROBE_CONF="/etc/modprobe.d/phone-av-bridge-v4l2loopback.conf"
+MODULES_LOAD_CONF="/etc/modules-load.d/phone-av-bridge-v4l2loopback.conf"
+
+mkdir -p /etc/modprobe.d /etc/modules-load.d
+printf 'options v4l2loopback video_nr=%s card_label=%s exclusive_caps=0 max_buffers=2\n' "${VIDEO_NR}" "${CARD_LABEL}" > "${MODPROBE_CONF}" || true
+printf 'v4l2loopback\n' > "${MODULES_LOAD_CONF}" || true
+
+if command -v modprobe >/dev/null 2>&1; then
+  modprobe -r v4l2loopback || true
+  modprobe v4l2loopback video_nr="${VIDEO_NR}" card_label="${CARD_LABEL}" exclusive_caps=0 max_buffers=2 || true
+fi
+POSTINST
+
+cat > "${DEBIAN_DIR}/postrm" <<'POSTRM'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [[ "${1:-}" == "purge" ]]; then
+  rm -f /etc/modules-load.d/phone-av-bridge-v4l2loopback.conf || true
+  rm -f /etc/modprobe.d/phone-av-bridge-v4l2loopback.conf || true
+fi
+POSTRM
+
+chmod 0755 "${DEBIAN_DIR}/postinst" "${DEBIAN_DIR}/postrm"
 
 DEB_NAME="${PACKAGE_NAME}_${VERSION}_${ARCH}.deb"
 DEB_PATH="${DIST_DIR}/${DEB_NAME}"
