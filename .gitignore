@@ -1,0 +1,61 @@
+# General
+*.log
+*.tmp
+*.DS_Store
+.DS_Store
+*.swp
+*.swo
+*.pid
+*.orig
+
+# IDE / editor state
+.vscode/
+.idea/
+
+# macOS
+.AppleDouble
+.LSOverride
+._*
+*.DS_Store
+*.icloud
+
+# macOS / Xcode builds and user state
+macos-camera-extension/Build/
+macos-camera-extension/build/
+macos-camera-extension/build_signed/
+macos-camera-extension/.build/
+macos-camera-extension/xcuserdata/
+**/xcuserdata/
+**/*.xcuserdatad
+**/*.xcuserstate
+**/*.xcworkspace/xcuserdata/
+
+# Android
+android-resource-companion/.gradle/
+android-resource-companion/build/
+android-resource-companion/.idea/
+android-resource-companion/app/build/
+
+# Node / JS
+node_modules/
+host-resource-agent/node_modules/
+host-resource-agent/runtime/
+host-resource-agent/dist/
+dist/
+
+# Release artifacts and local bundles
+releases/
+releases/*.zip
+releases/**/*.zip
+
+# Build/test baselines
+releases/
+tmp/
+tmp_cameraextension_baseline/
+
+# Packaging outputs
+*.apk
+*.aab
+
+# media/logs
+*.mp4

@@ -1,0 +1,22 @@
+FROM node:22-bookworm
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    ffmpeg \
+    jq \
+    procps \
+    pulseaudio \
+    python3 \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/phone-resource-companion/host-resource-agent
+
+COPY . /workspace/phone-resource-companion
+
+RUN cd /workspace/phone-resource-companion/host-resource-agent \
+  && npm ci
+
+CMD ["bash", "/workspace/phone-resource-companion/host-resource-agent/tests/docker/start_host_agent.sh"]
