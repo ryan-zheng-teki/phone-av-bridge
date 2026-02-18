@@ -77,7 +77,7 @@ cd android-phone-av-bridge
 5. In Zoom/meeting app on Linux:
    - in compatibility mode, select camera device `AutoByteusPhoneCamera`,
    - select the virtual mic source matching `Monitor of PhoneAVBridgeMic-<phone>-<id>`,
-   - for phone speaker playback, ensure host output is available on the default Pulse/PipeWire sink monitor.
+   - for phone speaker playback, host now avoids bridge mic sources by default; if needed, set `LINUX_SPEAKER_CAPTURE_SOURCE` to force a specific source.
 
 Notes:
 - Camera/mic media is sent from Android via in-app RTSP server.

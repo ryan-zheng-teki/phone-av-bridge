@@ -84,7 +84,9 @@ Then open `http://127.0.0.1:8787`.
   - host runs ffmpeg RTSP audio -> Pulse sink,
   - meeting apps can select the generated source as microphone input (`Monitor of PhoneAVBridgeMic-<phone>-<id>`).
 - Linux speaker path:
-  - host captures default Pulse/PipeWire monitor source and exposes raw PCM at `/api/speaker/stream`,
+  - host prefers default Pulse/PipeWire monitor source, but excludes bridge-owned microphone sources (`phone_av_bridge_mic_*`) to avoid mic-to-speaker loopback,
+  - if no safe monitor exists, host falls back to other safe non-bridge sources; if none exist, speaker route reports unavailable,
+  - optional override: set `LINUX_SPEAKER_CAPTURE_SOURCE=<source-name>` to force a specific Pulse/PipeWire source,
   - Android app pulls this stream when `Enable Speaker` is toggled.
 - macOS microphone path:
   - host routes RTSP audio to `PhoneAVBridgeAudio 2ch`,

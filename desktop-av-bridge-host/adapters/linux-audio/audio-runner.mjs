@@ -20,6 +20,67 @@ async function commandExists(command) {
   }
 }
 
+function normalizeSourceName(sourceName) {
+  return (sourceName || '').trim();
+}
+
+function parseDefaultSinkNameFromPactlInfo(stdout = '') {
+  const sinkLine = stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .find((line) => line.toLowerCase().startsWith('default sink:'));
+  return sinkLine?.split(':').slice(1).join(':').trim() || '';
+}
+
+function parseSourcesFromPactlList(stdout = '') {
+  return stdout
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.split('\t')[1])
+    .map((value) => value?.trim())
+    .filter(Boolean);
+}
+
+function isBridgeMicrophoneSource(sourceName, { micSinkName, micSourceName }) {
+  const source = normalizeSourceName(sourceName);
+  if (!source) return false;
+  if (source === micSourceName) return true;
+  if (source === `${micSinkName}.monitor`) return true;
+  return source.startsWith('phone_av_bridge_mic_sink_') || source.startsWith('phone_av_bridge_mic_src_');
+}
+
+export function pickLinuxSpeakerCaptureSource({
+  override = '',
+  defaultSinkName = '',
+  sources = [],
+  micSinkName = '',
+  micSourceName = '',
+} = {}) {
+  const overrideSource = normalizeSourceName(override);
+  if (overrideSource) {
+    return overrideSource;
+  }
+
+  const availableSources = [...new Set(sources.map((source) => normalizeSourceName(source)).filter(Boolean))];
+  const allowSource = (sourceName) => !isBridgeMicrophoneSource(sourceName, { micSinkName, micSourceName });
+
+  const defaultMonitorSource = defaultSinkName ? `${defaultSinkName}.monitor` : '';
+  if (defaultMonitorSource && allowSource(defaultMonitorSource)) {
+    if (!availableSources.length || availableSources.includes(defaultMonitorSource)) {
+      return defaultMonitorSource;
+    }
+  }
+
+  const safeMonitorSource = availableSources.find((sourceName) => sourceName.endsWith('.monitor') && allowSource(sourceName));
+  if (safeMonitorSource) {
+    return safeMonitorSource;
+  }
+
+  const safeFallbackSource = availableSources.find((sourceName) => allowSource(sourceName));
+  return safeFallbackSource || null;
+}
+
 export class LinuxAudioRunner {
   constructor({ enableSpeaker = false, streamUrl = '' } = {}) {
     this.microphoneActive = false;
@@ -276,36 +337,27 @@ export class LinuxAudioRunner {
 
   async #resolveSpeakerSourceName() {
     const override = (process.env.LINUX_SPEAKER_CAPTURE_SOURCE || '').trim();
-    if (override) {
-      return override;
-    }
-
+    let defaultSinkName = '';
     try {
       const { stdout } = await execFileAsync('pactl', ['info']);
-      const sinkLine = stdout
-        .split('\n')
-        .map((line) => line.trim())
-        .find((line) => line.toLowerCase().startsWith('default sink:'));
-      const defaultSink = sinkLine?.split(':').slice(1).join(':').trim();
-      if (defaultSink) {
-        return `${defaultSink}.monitor`;
-      }
+      defaultSinkName = parseDefaultSinkNameFromPactlInfo(stdout);
     } catch {
     }
 
+    let sources = [];
     try {
       const { stdout } = await execFileAsync('pactl', ['list', 'short', 'sources']);
-      const sources = stdout
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-        .map((line) => line.split('\t')[1])
-        .filter(Boolean);
-      const monitorSource = sources.find((source) => source.endsWith('.monitor'));
-      return monitorSource || sources[0] || null;
+      sources = parseSourcesFromPactlList(stdout);
     } catch {
-      return null;
     }
+
+    return pickLinuxSpeakerCaptureSource({
+      override,
+      defaultSinkName,
+      sources,
+      micSinkName: this.micSinkName,
+      micSourceName: this.micSourceName,
+    });
   }
 
   async #startSpeakerCapture(sourceName) {
