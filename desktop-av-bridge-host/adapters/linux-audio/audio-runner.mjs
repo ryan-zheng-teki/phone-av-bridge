@@ -47,7 +47,9 @@ function isBridgeMicrophoneSource(sourceName, { micSinkName, micSourceName }) {
   if (!source) return false;
   if (source === micSourceName) return true;
   if (source === `${micSinkName}.monitor`) return true;
-  return source.startsWith('phone_av_bridge_mic_sink_') || source.startsWith('phone_av_bridge_mic_src_');
+  return source.startsWith('phone_av_bridge_mic_sink_') ||
+    source.startsWith('phone_av_bridge_mic_src_') ||
+    source.startsWith('phone_av_bridge_mic_input_');
 }
 
 export function pickLinuxSpeakerCaptureSource({
@@ -105,7 +107,6 @@ export class LinuxAudioRunner {
     this.speakerSourceName = (process.env.LINUX_SPEAKER_CAPTURE_SOURCE || '').trim();
     this.speakerSampleRate = 48000;
     this.speakerChannels = 1;
-    this.micInputModuleId = null;
     this.#rebuildRouteIdentity();
   }
 
@@ -162,7 +163,7 @@ export class LinuxAudioRunner {
     await this.stopMicrophoneRoute();
     await this.#cleanupStaleMicrophoneModules();
     await this.#loadNullSink();
-    await this.#ensureVirtualMicrophoneSource();
+    this.#setMonitorMicrophoneSelectionTarget();
     await this.#startMicFfmpeg(this.streamUrl);
 
     this.activeStreamUrl = this.streamUrl;
@@ -193,19 +194,12 @@ export class LinuxAudioRunner {
       }
       this.micSinkModuleId = null;
     }
-    if (this.micInputModuleId !== null) {
-      try {
-        await execFileAsync('pactl', ['unload-module', String(this.micInputModuleId)]);
-      } catch {
-      }
-      this.micInputModuleId = null;
-    }
     await this.#cleanupStaleMicrophoneModules();
 
     this.activeStreamUrl = '';
     this.microphoneActive = false;
     this.activeRouteKey = '';
-    this.micSelectionTarget = this.micInputSourceDescription;
+    this.#setMonitorMicrophoneSelectionTarget();
   }
 
   async startSpeakerRoute() {
@@ -335,7 +329,7 @@ export class LinuxAudioRunner {
       '48000',
       '-f',
       'pulse',
-      this.micSinkName,
+      'phone-av-bridge-mic',
     ], {
       stdio: ['ignore', 'pipe', 'pipe'],
     });
@@ -345,37 +339,65 @@ export class LinuxAudioRunner {
       this.microphoneActive = false;
     });
     await this.#awaitFfmpegStartup(process, 'Microphone bridge failed');
+    const routed = await this.#moveSinkInputToBridgeSink(process.pid, this.micSinkName);
+    if (!routed) {
+      try {
+        process.kill('SIGTERM');
+      } catch {
+      }
+      throw new Error(`Microphone bridge failed: could not route ffmpeg sink-input to ${this.micSinkName}.`);
+    }
 
     this.micFfmpegProcess = process;
   }
 
-  async #ensureVirtualMicrophoneSource() {
-    this.micSelectionTarget = this.micInputSourceDescription;
-    let stdout = '';
-    try {
-      await this.#unloadModulesByArgs([
-        `source_name=${this.micInputSourceName}`,
-      ]);
-      ({ stdout } = await execFileAsync('pactl', [
-        'load-module',
-        'module-remap-source',
-        `master=${this.micSinkName}.monitor`,
-        `source_name=${this.micInputSourceName}`,
-        `source_properties=device.description=${this.micInputSourceDescription}`,
-      ]));
-    } catch {
-      this.micSelectionTarget = `Monitor of ${this.micSinkDescription}`;
-      this.micInputModuleId = null;
-      return;
+  async #moveSinkInputToBridgeSink(processId, sinkName) {
+    if (!Number.isInteger(processId) || processId <= 0 || !sinkName) {
+      return false;
     }
 
-    const moduleId = Number.parseInt(stdout.trim(), 10);
-    if (Number.isNaN(moduleId)) {
-      this.micSelectionTarget = `Monitor of ${this.micSinkDescription}`;
-      this.micInputModuleId = null;
-      return;
+    const deadline = Date.now() + 4000;
+    while (Date.now() < deadline) {
+      const sinkInputId = await this.#findSinkInputIdByProcessId(processId);
+      if (sinkInputId !== null) {
+        try {
+          await execFileAsync('pactl', ['move-sink-input', String(sinkInputId), sinkName]);
+          return true;
+        } catch {
+          return false;
+        }
+      }
+      await new Promise((resolve) => setTimeout(resolve, 120));
     }
-    this.micInputModuleId = moduleId;
+    return false;
+  }
+
+  async #findSinkInputIdByProcessId(processId) {
+    try {
+      const { stdout } = await execFileAsync('pactl', ['list', 'sink-inputs']);
+      const blocks = stdout.split(/\n\s*\n/).map((block) => block.trim()).filter(Boolean);
+      for (const block of blocks) {
+        const idMatch = block.match(/#(\d+)/);
+        const pidMatch = block.match(/application\.process\.id = "(\d+)"/);
+        if (!idMatch || !pidMatch) {
+          continue;
+        }
+        if (Number.parseInt(pidMatch[1], 10) !== processId) {
+          continue;
+        }
+        const sinkInputId = Number.parseInt(idMatch[1], 10);
+        if (!Number.isNaN(sinkInputId)) {
+          return sinkInputId;
+        }
+      }
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  #setMonitorMicrophoneSelectionTarget() {
+    this.micSelectionTarget = `Monitor of ${this.micSinkDescription}`;
   }
 
   async #cleanupStaleMicrophoneModules() {
@@ -539,7 +561,7 @@ export class LinuxAudioRunner {
     this.micSinkDescription = `PhoneAVBridgeMic-${nameToken}-${idToken}`;
     this.micSourceDescription = `PhoneAVBridgeMicSource-${nameToken}-${idToken}`;
     this.micInputSourceDescription = `PhoneAVBridgeMicInput-${nameToken}-${idToken}`;
-    this.micSelectionTarget = this.micInputSourceDescription;
+    this.#setMonitorMicrophoneSelectionTarget();
   }
 }
 

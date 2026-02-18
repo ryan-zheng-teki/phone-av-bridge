@@ -80,10 +80,9 @@ Then open `http://127.0.0.1:8787`.
   - compatibility mode: host camera adapter pulls RTSP and writes to configured `v4l2loopback` device.
   - userspace mode: host validates ingest/decode path without exposing a loopback webcam device.
 - Linux microphone path:
-  - host audio adapter creates a per-phone Pulse/PipeWire null sink/source (name includes phone identity),
-  - host runs ffmpeg RTSP audio -> Pulse sink, then exposes a remapped virtual source for meeting apps,
-  - meeting apps can select the generated source as microphone input (`PhoneAVBridgeMicInput-<phone>-<id>`),
-  - fallback on unsupported hosts remains monitor-based (`Monitor of PhoneAVBridgeMic-<phone>-<id>`).
+  - host audio adapter creates a per-phone Pulse/PipeWire null sink (name includes phone identity),
+  - host runs ffmpeg RTSP audio -> Pulse sink, and meeting apps capture from that sink monitor source,
+  - meeting apps select the monitor-based microphone target (`Monitor of PhoneAVBridgeMic-<phone>-<id>`).
 - Linux speaker path:
   - host prefers default Pulse/PipeWire monitor source, but excludes bridge-owned microphone sources (`phone_av_bridge_mic_*`) to avoid mic-to-speaker loopback,
   - if no safe monitor exists, host falls back to other safe non-bridge sources; if none exist, speaker route reports unavailable,

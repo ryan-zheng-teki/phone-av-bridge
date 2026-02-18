@@ -11,7 +11,7 @@ test('linux audio runner uses phone-identifiable microphone selection target', (
 
   const label = runner.getMicrophoneDeviceName();
   assert.match(label, /^Pixel 9 Pro Microphone/);
-  assert.match(label, /PhoneAVBridgeMicInput-pixel-9-pro-153049/);
+  assert.match(label, /Monitor of PhoneAVBridgeMic-pixel-9-pro-153049/);
 });
 
 test('speaker source resolver keeps safe default monitor', () => {
