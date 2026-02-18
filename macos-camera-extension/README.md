@@ -31,8 +31,11 @@ Install to `/Applications` for activation tests:
 ```bash
 sudo rm -rf /Applications/PhoneAVBridgeCamera.app
 sudo ditto "<derived-data>/Build/Products/Debug/PhoneAVBridgeCamera.app" /Applications/PhoneAVBridgeCamera.app
+sudo xattr -dr com.apple.quarantine /Applications/PhoneAVBridgeCamera.app
 open -a /Applications/PhoneAVBridgeCamera.app
 ```
+
+If you installed from a GitHub Release zip, run the same quarantine command after copying the app bundle to `/Applications`.
 
 Then approve the camera extension in:
 

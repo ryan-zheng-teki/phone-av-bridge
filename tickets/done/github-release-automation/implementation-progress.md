@@ -18,6 +18,9 @@ Completed
 - 2026-02-18: Added macOS unsigned packaging script (`macos-camera-extension/scripts/build-unsigned-release.sh`).
 - 2026-02-18: Added optional Android CI release signing config (env-driven) with deterministic debug fallback.
 - 2026-02-18: Updated root/module docs for release workflow and artifact outputs.
+- 2026-02-18: Ran GitHub Actions workflow `Release` via `workflow_dispatch` with tag `v0.1.2-rc1`; all jobs passed (`prepare`, `build_android`, `build_macos_camera`, `build_linux_deb`, `publish_release`).
+- 2026-02-18: Verified GitHub pre-release `v0.1.2-rc1` published with Android APK, macOS unsigned zip, Linux `.deb`, and `SHA256SUMS.txt`.
+- 2026-02-18: Added post-install macOS quarantine-removal docs for GitHub Release users.
 
 ## File-Level Progress Table
 | Change ID | Change Type | File | File Status | Verification | Notes |
@@ -44,21 +47,28 @@ Completed
 - Linux `.deb` packaging smoke in Ubuntu container:
   - `docker run ... ubuntu:24.04 ... ./scripts/build-deb-package.sh 0.1.2-ci`
   - `docker run ... ubuntu:24.04 ... dpkg-deb -I dist/phone-av-bridge-host_0.1.2-ci_arm64.deb`
+- Live GitHub Actions release run:
+  - `gh workflow run release.yml --ref main -f tag=v0.1.2-rc1`
+  - `gh run watch 22135177622 --exit-status`
+  - `gh release view v0.1.2-rc1 --json url,assets`
 
 ## Failed Integration/E2E Escalation Log
 - None.
 
 ## E2E Feasibility Record
-- E2E feasible locally: Partially.
-- Not feasible locally: full GitHub tag-triggered workflow execution on hosted runners and live GitHub Release publishing.
+- E2E feasible locally: Yes (executed via GitHub-hosted runners from local `gh` trigger).
+- Not feasible locally: None for this ticket scope.
 - Best available evidence captured:
   - local build and packaging scripts validated,
   - workflow syntax validated,
-  - Ubuntu container `.deb` build validated.
+  - Ubuntu container `.deb` build validated,
+  - live workflow run success: `https://github.com/ryan-zheng-teki/phone-av-bridge/actions/runs/22135177622`,
+  - published pre-release artifacts: `https://github.com/ryan-zheng-teki/phone-av-bridge/releases/tag/v0.1.2-rc1`.
 - Residual risk:
-  - first real tag run may expose runner/environment differences (especially Android signing secret setup and GitHub Release permission constraints).
+  - Android artifact is `debug` unless signing secrets are configured for production release tags.
 
 ## Docs Sync Log
 | Date | Docs Impact | Files Updated | Rationale | Status |
 | --- | --- | --- | --- | --- |
 | 2026-02-18 | Updated | `README.md`, `desktop-av-bridge-host/README.md`, `macos-camera-extension/README.md` | release workflow and new packaging scripts introduced | Completed |
+| 2026-02-18 | Updated | `README.md`, `macos-camera-extension/README.md` | add quarantine-removal step for macOS app bundles downloaded from GitHub Releases | Completed |

@@ -103,6 +103,8 @@ Notes:
 Notes:
 - Host pairing identity is persisted at `~/.phone-av-bridge-host/state.json`.
 - On first camera use, macOS requires one-time camera extension approval in `System Settings -> General -> Login Items & Extensions -> Camera Extensions`.
+- If `PhoneAVBridgeCamera.app` was downloaded from GitHub Releases, remove quarantine after copying to `/Applications`:
+  `sudo xattr -dr com.apple.quarantine /Applications/PhoneAVBridgeCamera.app`
 
 ### Bridge Docker emulation
 
