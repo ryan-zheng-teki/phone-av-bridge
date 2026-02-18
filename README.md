@@ -206,8 +206,43 @@ phone-av-bridge-host-start
 
 4. Install Android APK on phone and pair to host.
 5. In Zoom/Meet on Linux:
-   - Camera: select loopback camera device (compatibility mode) or userspace bridge source.
-   - Microphone: select `<Phone Name> Microphone`.
+   - Camera: `AutoByteusPhoneCamera` (compatibility mode).
+   - Microphone: `PhoneAVBridgeMicInput-<phone>-<id>` (fallback name may appear as `Monitor of PhoneAVBridgeMic-...`).
+   - Speaker routing to phone is controlled from Android app `Enable Speaker`.
+
+Linux troubleshooting quick checks:
+
+```bash
+# Host process + live status
+ps -ef | rg 'desktop-app/server.mjs' | rg -v rg
+curl -s http://127.0.0.1:8787/api/status | jq '{resources:.status.resources,routeHints:.status.routeHints,issues:.status.issues}'
+
+# Virtual microphone sources
+pactl list short sources | rg 'phone_av_bridge_mic'
+
+# Host logs
+tail -n 120 ~/.local/state/phone-av-bridge-host/phone-av-bridge-host.log
+```
+
+If microphone does not appear in Zoom/Discord:
+- Fully quit and reopen the app (device list is often cached).
+- Confirm `PhoneAVBridgeMicInput-*` exists in `pactl list short sources`.
+
+If voice sounds doubled:
+- Restart host once to clear stale media workers:
+
+```bash
+phone-av-bridge-host-stop
+phone-av-bridge-host-start
+```
+
+If you need to pin speaker capture source persistently (advanced):
+
+```bash
+sudo phone-av-bridge-host-set-speaker-source <source-name>
+# Return to automatic safe selection:
+sudo phone-av-bridge-host-set-speaker-source auto
+```
 
 Stop host:
 

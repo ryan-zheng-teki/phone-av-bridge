@@ -175,3 +175,25 @@ Generated package:
 - macOS and Linux host-side routing paths are E2E validated at host level (automated scripts + live host status checks).
 - Final per-meeting-app UX still depends on each app refreshing device lists after permission/extension changes.
 - On Linux, compatibility webcam exposure still depends on `v4l2loopback` availability/configuration.
+
+## Linux quick troubleshooting
+
+Use these checks when a meeting app does not show devices or audio behaves unexpectedly.
+
+```bash
+# Host process + status summary
+ps -ef | rg 'desktop-app/server.mjs' | rg -v rg
+curl -s http://127.0.0.1:8787/api/status | jq '{resources:.status.resources,routeHints:.status.routeHints,issues:.status.issues}'
+
+# Virtual sources/sinks from host bridge
+pactl list short sources | rg 'phone_av_bridge_mic'
+pactl list short sinks | rg 'phone_av_bridge_mic'
+
+# Recent host logs
+tail -n 120 ~/.local/state/phone-av-bridge-host/phone-av-bridge-host.log
+```
+
+Common actions:
+- Mic not visible in Zoom/Discord: fully quit and reopen the app, then choose `PhoneAVBridgeMicInput-<phone>-<id>`.
+- Doubled/echoed outgoing voice: run `phone-av-bridge-host-stop` then `phone-av-bridge-host-start` to clear stale workers.
+- Persistent speaker source override (advanced): `sudo phone-av-bridge-host-set-speaker-source <source-name>` or `sudo phone-av-bridge-host-set-speaker-source auto`.
