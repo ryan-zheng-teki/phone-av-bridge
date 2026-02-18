@@ -16,8 +16,8 @@ class ViewController: NSViewController {
     private let frameWidth = Int(fixedCamWidth)
     private let frameHeight = Int(fixedCamHeight)
     private let frameBytes = Int(fixedCamWidth * fixedCamHeight * 4)
-    private let frameQueue = DispatchQueue(label: "org.autobyteus.prc.camera.frames")
-    private let frameStateQueue = DispatchQueue(label: "org.autobyteus.prc.camera.frame-state")
+    private let frameQueue = DispatchQueue(label: "org.autobyteus.phoneavbridge.camera.frames")
+    private let frameStateQueue = DispatchQueue(label: "org.autobyteus.phoneavbridge.camera.frame-state")
     private var frameListener: NWListener?
     private var frameConnection: NWConnection?
     private var latestFrame: Data?
@@ -396,7 +396,7 @@ class ViewController: NSViewController {
         }
         streamDemandLabel.stringValue = "Capture demand: waiting for client"
         DispatchQueue.main.async {
-            self.view.window?.title = "PRC Camera Host"
+            self.view.window?.title = "Phone AV Bridge Camera"
             self.view.window?.minSize = NSSize(width: 900, height: 620)
             if !self.didSetInitialStatus {
                 self.statusDetailLabel.stringValue = "Keep this app open. Then approve the camera extension once in System Settings."
@@ -615,15 +615,15 @@ private extension ViewController {
 
     func hostBridgeAppCandidates() -> [URL] {
         var candidates: [URL] = []
-        if let discovered = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "org.autobyteus.host-resource-agent") {
+        if let discovered = NSWorkspace.shared.urlForApplication(withBundleIdentifier: "org.autobyteus.phoneavbridge.host") {
             candidates.append(discovered)
         }
 
         let username = NSUserName()
         let explicitPaths = [
-            "/Users/\(username)/Applications/Host Resource Agent.app",
-            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Host Resource Agent.app").path,
-            "/Applications/Host Resource Agent.app",
+            "/Users/\(username)/Applications/Phone AV Bridge Host.app",
+            FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Applications/Phone AV Bridge Host.app").path,
+            "/Applications/Phone AV Bridge Host.app",
         ]
         for path in explicitPaths {
             let url = URL(fileURLWithPath: path)
@@ -709,13 +709,13 @@ private extension ViewController {
                             if let error = error {
                                 self.showMessage("failed to start host bridge app: \(error.localizedDescription)")
                             } else {
-                                self.showMessage("started Host Resource Agent")
+                                self.showMessage("started Phone AV Bridge Host")
                             }
                         }
                         return
                     }
                 }
-                self.showMessage("Host Resource Agent app not found. Install it first, then retry.")
+                self.showMessage("Phone AV Bridge Host app not found. Install it first, then retry.")
             }
         }
     }
@@ -724,7 +724,7 @@ private extension ViewController {
         if NSWorkspace.shared.open(hostBridgeBaseURL) {
             showMessage("Opened host bridge UI at \(hostBridgeBaseURL.absoluteString)")
         } else {
-            showMessage("Unable to open host bridge UI. Start Host Resource Agent first.")
+            showMessage("Unable to open host bridge UI. Start Phone AV Bridge Host first.")
         }
     }
 
@@ -927,7 +927,7 @@ private extension ViewController {
             rootStack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16),
         ])
 
-        let titleLabel = NSTextField(labelWithString: "Phone Resource Companion Camera")
+        let titleLabel = NSTextField(labelWithString: "Phone AV Bridge Camera")
         titleLabel.font = NSFont.systemFont(ofSize: 30, weight: .bold)
         titleLabel.textColor = .labelColor
 
@@ -1195,7 +1195,7 @@ private extension ViewController {
         textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         textView.textColor = .labelColor
         textView.backgroundColor = NSColor.textBackgroundColor
-        textView.string = "PRC Camera Host initialized.\n"
+        textView.string = "Phone AV Bridge Camera initialized.\n"
         logScroll.documentView = textView
         self.logTextView = textView
 

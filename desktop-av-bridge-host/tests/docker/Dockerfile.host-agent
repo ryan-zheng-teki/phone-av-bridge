@@ -1,0 +1,22 @@
+FROM node:22-bookworm
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends \
+    bash \
+    ca-certificates \
+    curl \
+    ffmpeg \
+    jq \
+    procps \
+    pulseaudio \
+    python3 \
+  && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /workspace/phone-av-bridge/desktop-av-bridge-host
+
+COPY . /workspace/phone-av-bridge
+
+RUN cd /workspace/phone-av-bridge/desktop-av-bridge-host \
+  && npm ci
+
+CMD ["bash", "/workspace/phone-av-bridge/desktop-av-bridge-host/tests/docker/start_host_agent.sh"]

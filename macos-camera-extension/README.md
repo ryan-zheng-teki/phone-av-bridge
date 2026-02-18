@@ -15,7 +15,7 @@ when the app runs, it asks the camera (using CoreMediaIO C API in Swift) if its 
 Use the helper script:
 
 ```bash
-cd /Users/normy/autobyteus_org/phone-resource-companion/macos-camera-extension
+cd macos-camera-extension
 ./scripts/build-signed-local.sh
 ```
 
@@ -24,14 +24,14 @@ This runs `xcodebuild` with:
 - `-allowProvisioningUpdates`
 - `-allowProvisioningDeviceRegistration`
 
-and produces a signed `samplecamera.app`.
+and produces a signed `PhoneAVBridgeCamera.app`.
 
 Install to `/Applications` for activation tests:
 
 ```bash
-sudo rm -rf /Applications/PRCCamera.app
-sudo ditto "<derived-data>/Build/Products/Debug/samplecamera.app" /Applications/PRCCamera.app
-open -a /Applications/PRCCamera.app
+sudo rm -rf /Applications/PhoneAVBridgeCamera.app
+sudo ditto "<derived-data>/Build/Products/Debug/PhoneAVBridgeCamera.app" /Applications/PhoneAVBridgeCamera.app
+open -a /Applications/PhoneAVBridgeCamera.app
 ```
 
 Then approve the camera extension in:

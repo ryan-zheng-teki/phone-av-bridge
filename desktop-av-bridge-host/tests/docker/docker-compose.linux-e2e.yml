@@ -1,0 +1,42 @@
+services:
+  rtsp-server:
+    image: bluenviron/mediamtx:latest
+    restart: unless-stopped
+
+  rtsp-publisher:
+    build:
+      context: ../../..
+      dockerfile: phone-av-camera-bridge-runtime/tests/emulation/Dockerfile.tester
+    depends_on:
+      - rtsp-server
+    command:
+      - /bin/bash
+      - -lc
+      - >
+        while true; do ffmpeg -hide_banner -loglevel warning -re
+        -f lavfi -i "testsrc=size=1280x720:rate=30"
+        -f lavfi -i "sine=frequency=880:sample_rate=48000"
+        -map 0:v:0 -map 1:a:0
+        -pix_fmt yuv420p -c:v libx264 -preset veryfast -tune zerolatency
+        -c:a aac -ar 48000 -ac 1
+        -f rtsp -rtsp_transport tcp rtsp://rtsp-server:8554/live || true; sleep 1; done
+
+  host-agent:
+    build:
+      context: ../../..
+      dockerfile: desktop-av-bridge-host/tests/docker/Dockerfile.host-agent
+    depends_on:
+      - rtsp-server
+      - rtsp-publisher
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8787
+      ENABLE_DISCOVERY: "0"
+      LINUX_CAMERA_MODE: userspace
+      STREAM_SOURCE_URL: rtsp://rtsp-server:8554/live
+      MAX_SECONDS: "0"
+      HOME: /tmp/host-agent-home
+      XDG_RUNTIME_DIR: /tmp/xdg-runtime
+      PULSE_SERVER: unix:/tmp/xdg-runtime/pulse/native
+    ports:
+      - "18787:8787"

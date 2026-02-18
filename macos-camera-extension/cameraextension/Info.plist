@@ -5,9 +5,9 @@
 	<key>CMIOExtension</key>
 	<dict>
 		<key>CMIOExtensionMachServiceName</key>
-		<string>WB8QCBB75J.org.autobyteus.prc.camera</string>
+		<string>group.org.autobyteus.phoneavbridge.camera.extension</string>
 	</dict>
 	<key>NSSystemExtensionUsageDescription</key>
-	<string>Phone Resource Companion needs this camera extension to expose your phone camera as a virtual webcam in meeting apps.</string>
+	<string>Phone AV Bridge needs this camera extension to expose your phone camera as a virtual webcam in meeting apps.</string>
 </dict>
 </plist>

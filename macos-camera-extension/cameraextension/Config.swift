@@ -6,6 +6,6 @@
 //
 
 let kFrameRate: Int = 30
-let cameraName = "Phone Resource Companion Camera"
+let cameraName = "Phone AV Bridge Camera"
 let fixedCamWidth: Int32 = 1280
 let fixedCamHeight: Int32 = 720

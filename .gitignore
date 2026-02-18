@@ -35,12 +35,19 @@ android-resource-companion/.gradle/
 android-resource-companion/build/
 android-resource-companion/.idea/
 android-resource-companion/app/build/
+android-phone-av-bridge/.gradle/
+android-phone-av-bridge/build/
+android-phone-av-bridge/.idea/
+android-phone-av-bridge/app/build/
 
 # Node / JS
 node_modules/
 host-resource-agent/node_modules/
 host-resource-agent/runtime/
 host-resource-agent/dist/
+desktop-av-bridge-host/node_modules/
+desktop-av-bridge-host/runtime/
+desktop-av-bridge-host/dist/
 dist/
 
 # Release artifacts and local bundles
