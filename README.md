@@ -10,8 +10,57 @@ Unified root project for Android + desktop host + bridge tooling.
   - Desktop host app (Linux-first) with local UI/API, preflight checks, discovery, and adapter orchestration.
 - `phone-ip-webcam-bridge/`
   - Bridge runtime and emulation harness used by Linux camera path.
-- `tickets/one-tap-android-resource-companion/`
-  - Software-engineering workflow artifacts (requirements/design/call stack/review/plan/progress).
+- `tickets/in-progress/` and `tickets/done/`
+  - Software-engineering workflow artifacts (requirements/design/call stack/review/plan/progress), split by status.
+
+## Project Relationships (What Depends on What)
+
+1. `android-resource-companion` is the phone-side controller and media source.
+2. `host-resource-agent` is the desktop-side orchestrator and API surface.
+3. `host-resource-agent` uses:
+   - `phone-ip-webcam-bridge` for Linux camera ingest/output (`adapters/linux-camera/bridge-runner.mjs` launches `phone-ip-webcam-bridge/bin/run-bridge.sh`).
+   - `macos-camera-extension` runtime artifacts (`PRCCamera.app`) for macOS virtual camera.
+   - `host-resource-agent/macos-audio-driver` (`PRCAudio.driver`) for macOS virtual mic/speaker route.
+
+In short: Android sends state/media -> Host Resource Agent orchestrates -> platform adapters expose desktop camera/mic/speaker devices.
+
+## Active vs Legacy/Reference
+
+Active runtime projects:
+
+- `android-resource-companion/`
+- `host-resource-agent/`
+- `phone-ip-webcam-bridge/` (active on Linux camera path)
+- `macos-camera-extension/` (active on macOS camera path)
+
+Inside `macos-camera-extension/`:
+
+- `cameraextension/`: the CoreMediaIO system extension target (the actual virtual camera provider).
+- `samplecamera/`: the host macOS app target (distributed as `PRCCamera.app`) that embeds/activates the extension and shows host status.
+- Both are required in the current design and are used.
+
+Not primary runtime source projects:
+
+- `tickets/`: planning/design/progress docs only.
+- `dist/`, `releases/`: build/release outputs.
+- `**/build`, `**/build_signed`, `**/.gradle`, `**/node_modules`: generated artifacts.
+- `tmp_cameraextension_baseline/`: local baseline/reference snapshot; not used by host runtime.
+
+Deprecated/removed path:
+
+- Legacy macOS BlackHole-based audio adapter path is removed; current macOS audio path is first-party `PRCAudio.driver`.
+
+## Legacy Cleanup Note
+
+- Runtime legacy adapters are removed from active code paths (no OBS-based camera adapter and no legacy macOS `adapters/macos-audio/*` route).
+- Legacy upstream documentation files bundled in `PRCAudio.driver/Contents/Resources` were removed to avoid confusion.
+- Remaining `BlackHole` mentions in the driver area are implementation provenance details (for example build helper source and plugin factory symbol in `Info.plist`), not active app-level dependency paths.
+
+## Ticket Workflow
+
+- Create new tickets under `tickets/in-progress/<ticket-name>/`.
+- When implementation and validation are complete, move the ticket folder to `tickets/done/<ticket-name>/`.
+- Keep `tickets/in-progress/` only for active work to make current priorities obvious.
 
 ## Developer Quick Start
 
