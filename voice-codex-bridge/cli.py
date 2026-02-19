@@ -184,6 +184,7 @@ class VoiceCodexCliBridge:
         self._stdin_fd = sys.stdin.fileno()
         self._old_term = None
         self._stdin_pending = bytearray()
+        self._transcript_draft = ""
 
     def run(self) -> int:
         self._ensure_prereqs()
@@ -296,6 +297,10 @@ class VoiceCodexCliBridge:
             del self._stdin_pending[0]
 
         if forward:
+            if self.record_key != "enter" and any(
+                key in forward for key in (0x0D, 0x0A)
+            ):
+                self._transcript_draft = ""
             os.write(self._master_fd, bytes(forward))
 
     def _toggle_recording(self) -> None:
@@ -469,11 +474,22 @@ class VoiceCodexCliBridge:
         if not text:
             self._print_status("no speech detected.")
             return
-        self._print_status(f"transcript: {text}")
+        appended = self._append_transcript_draft(text)
+        self._print_status(f"transcript draft: {appended}")
 
         if self.auto_send and self._master_fd is not None:
-            os.write(self._master_fd, (text + "\n").encode("utf-8", errors="ignore"))
-            self._print_status("sent to codex.")
+            os.write(self._master_fd, (text + " ").encode("utf-8", errors="ignore"))
+            self._print_status("appended to codex draft; press Enter to send.")
+
+    def _append_transcript_draft(self, text: str) -> str:
+        incoming = (text or "").strip()
+        if not incoming:
+            return self._transcript_draft
+        if self._transcript_draft:
+            self._transcript_draft = f"{self._transcript_draft} {incoming}"
+        else:
+            self._transcript_draft = incoming
+        return self._transcript_draft
 
     def _print_status(self, message: str) -> None:
         sys.stdout.write(f"\r\n[voice-codex] {message}\r\n")

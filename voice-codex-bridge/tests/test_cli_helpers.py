@@ -65,6 +65,23 @@ class VoiceCodexCliHelperTests(unittest.TestCase):
         self.assertTrue(self.cli.record_key_sequence_is_partial(b"\x1b[1", "f8"))
         self.assertFalse(self.cli.record_key_sequence_is_partial(b"\x1b[A", "f8"))
 
+    def test_transcript_draft_accumulates(self):
+        bridge = self.cli.VoiceCodexCliBridge(
+            codex_command="cat",
+            language="en",
+            model="tiny.en",
+            device="cpu",
+            compute_type="int8",
+            record_source="",
+            sample_rate=16000,
+            auto_send=False,
+            record_key="ctrl-x",
+        )
+        self.assertEqual(bridge._append_transcript_draft("hello"), "hello")
+        self.assertEqual(bridge._append_transcript_draft("world"), "hello world")
+        self.assertEqual(bridge._append_transcript_draft(""), "hello world")
+        self.assertEqual(bridge._append_transcript_draft(" again"), "hello world again")
+
 
 if __name__ == "__main__":
     unittest.main()

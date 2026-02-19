@@ -39,7 +39,7 @@ cd voice-codex-bridge
 
 Hotkeys:
 - `Ctrl+X`: start/stop recording (default)
-- On stop, transcript is sent to Codex automatically (default).
+- On stop, transcript is appended to the current Codex input line. Press Enter in Codex to submit the full composed message.
 
 All other keys are forwarded to Codex unchanged, so normal Codex commands still work.
 
