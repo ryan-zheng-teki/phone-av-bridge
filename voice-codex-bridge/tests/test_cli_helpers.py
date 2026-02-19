@@ -1,4 +1,6 @@
 import importlib.util
+import os
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -81,6 +83,51 @@ class VoiceCodexCliHelperTests(unittest.TestCase):
         self.assertEqual(bridge._append_transcript_draft("world"), "hello world")
         self.assertEqual(bridge._append_transcript_draft(""), "hello world")
         self.assertEqual(bridge._append_transcript_draft(" again"), "hello world again")
+
+    def test_auto_send_appends_multiple_transcripts_without_enter(self):
+        class FakeStt:
+            def __init__(self):
+                self._items = ["first chunk", "second chunk"]
+
+            def transcribe_file(self, wav_path: str, language: str) -> str:
+                _ = (wav_path, language)
+                return self._items.pop(0)
+
+        bridge = self.cli.VoiceCodexCliBridge(
+            codex_command="cat",
+            language="en",
+            model="tiny.en",
+            device="cpu",
+            compute_type="int8",
+            record_source="",
+            sample_rate=16000,
+            auto_send=True,
+            record_key="ctrl-x",
+        )
+        bridge.stt_engine = FakeStt()
+
+        read_fd, write_fd = os.pipe()
+        bridge._master_fd = write_fd
+        try:
+            tmp1 = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            tmp1.close()
+            tmp2 = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            tmp2.close()
+
+            bridge._transcribe_and_maybe_send(tmp1.name)
+            bridge._transcribe_and_maybe_send(tmp2.name)
+
+            os.close(write_fd)
+            payload = os.read(read_fd, 1024).decode("utf-8", errors="ignore")
+        finally:
+            os.close(read_fd)
+            try:
+                os.close(write_fd)
+            except OSError:
+                pass
+
+        self.assertEqual(payload, "first chunk second chunk ")
+        self.assertEqual(bridge._transcript_draft, "first chunk second chunk")
 
 
 if __name__ == "__main__":
