@@ -81,8 +81,13 @@ Then open `http://127.0.0.1:8787`.
   - userspace mode: host validates ingest/decode path without exposing a loopback webcam device.
 - Linux microphone path:
   - host audio adapter creates a per-phone Pulse/PipeWire null sink (name includes phone identity),
-  - host runs ffmpeg RTSP audio -> Pulse sink, and meeting apps capture from that sink monitor source,
-  - meeting apps select the monitor-based microphone target (`Monitor of PhoneAVBridgeMic-<phone>-<id>`).
+  - host runs ffmpeg RTSP audio -> Pulse sink with low-latency defaults, and exposes a remapped virtual mic source for app compatibility,
+  - meeting apps should select `PhoneAVBridgeMicInput-<phone>-<id>` as microphone input,
+  - host treats remapped source creation as required; if remap creation fails, microphone route start fails with explicit error.
+  - optional tuning via host environment:
+    - `LINUX_MIC_LOW_LATENCY=1` (default; set `0`/`false`/`off`/`no` to disable low-latency ffmpeg flags),
+    - `LINUX_MIC_PULSE_LATENCY_MSEC=30` (default, valid range `10..500`),
+    - `LINUX_MIC_RTSP_TRANSPORT=tcp` (default; can be set to `udp` on clean local networks).
 - Linux speaker path:
   - host prefers default Pulse/PipeWire monitor source, but excludes bridge-owned microphone sources (`phone_av_bridge_mic_*`) to avoid mic-to-speaker loopback,
   - if no safe monitor exists, host falls back to other safe non-bridge sources; if none exist, speaker route reports unavailable,
@@ -196,3 +201,26 @@ Common actions:
 - Mic not visible in Zoom/Discord: fully quit and reopen the app, then choose `PhoneAVBridgeMicInput-<phone>-<id>`.
 - Doubled/echoed outgoing voice: run `phone-av-bridge-host-stop` then `phone-av-bridge-host-start` to clear stale workers.
 - Persistent speaker source override (advanced): `sudo phone-av-bridge-host-set-speaker-source <source-name>` or `sudo phone-av-bridge-host-set-speaker-source auto`.
+- Mic was working, then suddenly disappears or stops capturing (PipeWire/WirePlumber stale stream restore):
+
+```bash
+# 1) fully quit meeting/browser apps first (Zoom, Chrome, Discord)
+phone-av-bridge-host-stop || true
+
+# 2) restart user audio graph
+systemctl --user restart wireplumber pipewire pipewire-pulse
+
+# 3) start host again
+phone-av-bridge-host-start
+```
+
+- If instability keeps returning, do a one-time cleanup of stale bridge restore entries:
+
+```bash
+cp ~/.local/state/wireplumber/restore-stream ~/.local/state/wireplumber/restore-stream.bak.$(date +%s)
+tmpf=$(mktemp)
+grep -vE 'phone_av_bridge|PhoneAVBridgeMicInput|Google\\sChrome\\sinput|ZOOM\\sVoiceEngine' ~/.local/state/wireplumber/restore-stream > "$tmpf" || true
+mv "$tmpf" ~/.local/state/wireplumber/restore-stream
+systemctl --user restart wireplumber pipewire pipewire-pulse
+phone-av-bridge-host-start
+```

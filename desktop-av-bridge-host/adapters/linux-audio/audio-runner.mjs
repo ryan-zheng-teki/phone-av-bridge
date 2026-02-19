@@ -3,6 +3,8 @@ import { promisify } from 'node:util';
 import { buildDeviceNames, compactId, normalizeDeviceIdentity, slugify } from '../common/device-name.mjs';
 
 const execFileAsync = promisify(execFile);
+const DEFAULT_LINUX_MIC_PULSE_LATENCY_MSEC = '30';
+const LOW_LATENCY_DISABLED_VALUES = new Set(['0', 'false', 'off', 'no']);
 
 function safeEnd(response) {
   try {
@@ -40,6 +42,59 @@ function parseSourcesFromPactlList(stdout = '') {
     .map((line) => line.split('\t')[1])
     .map((value) => value?.trim())
     .filter(Boolean);
+}
+
+export function isLinuxMicLowLatencyEnabled(rawValue = process.env.LINUX_MIC_LOW_LATENCY) {
+  const normalized = String(rawValue ?? '').trim().toLowerCase();
+  if (!normalized) return true;
+  return !LOW_LATENCY_DISABLED_VALUES.has(normalized);
+}
+
+export function resolveLinuxMicPulseLatencyMsec(rawValue = process.env.LINUX_MIC_PULSE_LATENCY_MSEC) {
+  const normalized = String(rawValue ?? '').trim();
+  if (!normalized) return DEFAULT_LINUX_MIC_PULSE_LATENCY_MSEC;
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || parsed < 10 || parsed > 500) {
+    return DEFAULT_LINUX_MIC_PULSE_LATENCY_MSEC;
+  }
+  return String(parsed);
+}
+
+export function buildLinuxMicFfmpegArgs(streamUrl, { lowLatency = true, rtspTransport = 'tcp' } = {}) {
+  const transport = String(rtspTransport || '').trim() || 'tcp';
+  const args = [
+    '-hide_banner',
+    '-loglevel',
+    'warning',
+    '-rtsp_transport',
+    transport,
+  ];
+
+  if (lowLatency) {
+    args.push(
+      '-fflags', 'nobuffer',
+      '-flags', 'low_delay',
+      '-analyzeduration', '0',
+      '-probesize', '32k',
+      '-flush_packets', '1',
+    );
+  }
+
+  args.push(
+    '-i',
+    streamUrl,
+    '-map',
+    '0:a:0?',
+    '-vn',
+    '-ac',
+    '1',
+    '-ar',
+    '48000',
+    '-f',
+    'pulse',
+    'phone-av-bridge-mic',
+  );
+  return args;
 }
 
 function isBridgeMicrophoneSource(sourceName, { micSinkName, micSourceName }) {
@@ -107,6 +162,7 @@ export class LinuxAudioRunner {
     this.speakerSourceName = (process.env.LINUX_SPEAKER_CAPTURE_SOURCE || '').trim();
     this.speakerSampleRate = 48000;
     this.speakerChannels = 1;
+    this.micInputModuleId = null;
     this.#rebuildRouteIdentity();
   }
 
@@ -163,7 +219,7 @@ export class LinuxAudioRunner {
     await this.stopMicrophoneRoute();
     await this.#cleanupStaleMicrophoneModules();
     await this.#loadNullSink();
-    this.#setMonitorMicrophoneSelectionTarget();
+    await this.#ensureVirtualMicrophoneSource();
     await this.#startMicFfmpeg(this.streamUrl);
 
     this.activeStreamUrl = this.streamUrl;
@@ -194,12 +250,19 @@ export class LinuxAudioRunner {
       }
       this.micSinkModuleId = null;
     }
+    if (this.micInputModuleId !== null) {
+      try {
+        await execFileAsync('pactl', ['unload-module', String(this.micInputModuleId)]);
+      } catch {
+      }
+      this.micInputModuleId = null;
+    }
     await this.#cleanupStaleMicrophoneModules();
 
     this.activeStreamUrl = '';
     this.microphoneActive = false;
     this.activeRouteKey = '';
-    this.#setMonitorMicrophoneSelectionTarget();
+    this.micSelectionTarget = this.micInputSourceDescription;
   }
 
   async startSpeakerRoute() {
@@ -312,33 +375,39 @@ export class LinuxAudioRunner {
   }
 
   async #startMicFfmpeg(streamUrl) {
-    const process = spawn('ffmpeg', [
-      '-hide_banner',
-      '-loglevel',
-      'warning',
-      '-rtsp_transport',
-      'tcp',
-      '-i',
-      streamUrl,
-      '-map',
-      '0:a:0?',
-      '-vn',
-      '-ac',
-      '1',
-      '-ar',
-      '48000',
-      '-f',
-      'pulse',
-      'phone-av-bridge-mic',
-    ], {
-      stdio: ['ignore', 'pipe', 'pipe'],
+    const lowLatencyEnabled = isLinuxMicLowLatencyEnabled();
+    const pulseLatencyMsec = resolveLinuxMicPulseLatencyMsec();
+    let process = this.#spawnMicFfmpegProcess(streamUrl, {
+      lowLatency: lowLatencyEnabled,
+      pulseLatencyMsec,
     });
 
     process.on('exit', () => {
       this.micFfmpegProcess = null;
       this.microphoneActive = false;
     });
-    await this.#awaitFfmpegStartup(process, 'Microphone bridge failed');
+
+    try {
+      await this.#awaitFfmpegStartup(process, 'Microphone bridge failed');
+    } catch (error) {
+      if (!lowLatencyEnabled) {
+        throw error;
+      }
+      try {
+        process.kill('SIGTERM');
+      } catch {
+      }
+      process = this.#spawnMicFfmpegProcess(streamUrl, {
+        lowLatency: false,
+        pulseLatencyMsec,
+      });
+      process.on('exit', () => {
+        this.micFfmpegProcess = null;
+        this.microphoneActive = false;
+      });
+      await this.#awaitFfmpegStartup(process, 'Microphone bridge failed');
+    }
+
     const routed = await this.#moveSinkInputToBridgeSink(process.pid, this.micSinkName);
     if (!routed) {
       try {
@@ -349,6 +418,21 @@ export class LinuxAudioRunner {
     }
 
     this.micFfmpegProcess = process;
+  }
+
+  #spawnMicFfmpegProcess(streamUrl, { lowLatency = true, pulseLatencyMsec = DEFAULT_LINUX_MIC_PULSE_LATENCY_MSEC } = {}) {
+    const rtspTransport = (process.env.LINUX_MIC_RTSP_TRANSPORT || 'tcp').trim() || 'tcp';
+    const args = buildLinuxMicFfmpegArgs(streamUrl, {
+      lowLatency,
+      rtspTransport,
+    });
+    return spawn('ffmpeg', args, {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PULSE_LATENCY_MSEC: String(pulseLatencyMsec),
+      },
+    });
   }
 
   async #moveSinkInputToBridgeSink(processId, sinkName) {
@@ -396,8 +480,31 @@ export class LinuxAudioRunner {
     }
   }
 
-  #setMonitorMicrophoneSelectionTarget() {
-    this.micSelectionTarget = `Monitor of ${this.micSinkDescription}`;
+  async #ensureVirtualMicrophoneSource() {
+    this.micSelectionTarget = this.micInputSourceDescription;
+    let stdout = '';
+    try {
+      await this.#unloadModulesByArgs([
+        `source_name=${this.micInputSourceName}`,
+      ]);
+      ({ stdout } = await execFileAsync('pactl', [
+        'load-module',
+        'module-remap-source',
+        `master=${this.micSinkName}.monitor`,
+        `source_name=${this.micInputSourceName}`,
+        `source_properties=device.description=${this.micInputSourceDescription}`,
+      ]));
+    } catch (error) {
+      this.micInputModuleId = null;
+      throw new Error(`Failed to create Linux virtual microphone source (${this.micInputSourceName}): ${error.message}`);
+    }
+
+    const moduleId = Number.parseInt(stdout.trim(), 10);
+    if (Number.isNaN(moduleId)) {
+      this.micInputModuleId = null;
+      throw new Error(`Failed to create Linux virtual microphone source (${this.micInputSourceName}): invalid module id.`);
+    }
+    this.micInputModuleId = moduleId;
   }
 
   async #cleanupStaleMicrophoneModules() {
@@ -561,7 +668,7 @@ export class LinuxAudioRunner {
     this.micSinkDescription = `PhoneAVBridgeMic-${nameToken}-${idToken}`;
     this.micSourceDescription = `PhoneAVBridgeMicSource-${nameToken}-${idToken}`;
     this.micInputSourceDescription = `PhoneAVBridgeMicInput-${nameToken}-${idToken}`;
-    this.#setMonitorMicrophoneSelectionTarget();
+    this.micSelectionTarget = this.micInputSourceDescription;
   }
 }
 
