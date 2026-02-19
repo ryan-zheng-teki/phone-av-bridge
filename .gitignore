@@ -66,3 +66,8 @@ tmp_cameraextension_baseline/
 
 # media/logs
 *.mp4
+
+# Voice Codex bridge local env artifacts
+voice-codex-bridge/.venv/
+**/__pycache__/
+*.pyc

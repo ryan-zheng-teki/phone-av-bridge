@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
+
+if [[ -x "${SCRIPT_DIR}/.venv/bin/python3" ]]; then
+  PYTHON_BIN="${SCRIPT_DIR}/.venv/bin/python3"
+else
+  PYTHON_BIN="${PYTHON_BIN:-python3}"
+fi
+
+exec "${PYTHON_BIN}" "${SCRIPT_DIR}/cli.py" "$@"
