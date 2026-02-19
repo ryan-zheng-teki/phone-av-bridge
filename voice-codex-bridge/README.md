@@ -108,8 +108,8 @@ python3 -m unittest discover -s tests -v
 
 1. Set command (default `codex`) and click **Start Codex**.
 2. Hold **Hold To Talk** button, speak, then release.
-3. Review transcript.
-4. Click **Send To Codex** (or enable auto-send).
+3. Review transcript. Additional recording turns append to the same transcript box so you can continue dictation before sending.
+4. Click **Send To Codex** (or enable auto-send) to send either the currently composed text or the latest chunk when auto-send is on.
 
 ## Environment variables
 

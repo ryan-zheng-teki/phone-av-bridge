@@ -71,13 +71,20 @@ async function stopCodex() {
   await refreshOutput();
 }
 
-async function sendTextToCodex() {
-  const text = els.transcript.value.trim();
-  if (!text) return;
+function appendTranscriptText(text) {
+  const incoming = (text || "").trim();
+  if (!incoming) return;
+  const current = els.transcript.value.trimEnd();
+  els.transcript.value = current ? `${current} ${incoming}` : incoming;
+}
+
+async function sendTextToCodex(text = null) {
+  const finalText = typeof text === "string" ? text.trim() : els.transcript.value.trim();
+  if (!finalText) return;
   await requestJson("/api/codex/send", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text }),
+    body: JSON.stringify({ text: finalText }),
   });
   await refreshOutput();
 }
@@ -138,10 +145,10 @@ async function transcribeBlob(blob) {
     method: "POST",
     body: form,
   });
-  els.transcript.value = payload.text || "";
+  appendTranscriptText(payload.text);
   els.sttStatus.textContent = `transcribed with ${payload.model}`;
   if (els.autoSend.checked && payload.text && payload.text.trim()) {
-    await sendTextToCodex();
+    await sendTextToCodex(payload.text);
   }
 }
 
