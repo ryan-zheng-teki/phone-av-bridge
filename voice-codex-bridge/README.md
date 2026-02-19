@@ -1,4 +1,4 @@
-# Voice to Codex PTY Bridge (MVP)
+# Voice to Codex PTY Bridge (CLI)
 
 Local app that records microphone audio, transcribes it with a small STT model, and sends text to a Codex process via PTY stdin.
 
@@ -19,7 +19,7 @@ This app launches Codex in its own PTY so text injection is deterministic (much 
 
 Default in this MVP: `tiny.en` (fast startup and low latency).
 
-## Quick start
+## Quick start (CLI only)
 
 ```bash
 cd voice-codex-bridge
@@ -28,7 +28,7 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Terminal mode (recommended for Codex CLI users)
+## Terminal mode (CLI only)
 
 Run Codex inside the wrapper PTY:
 
@@ -87,16 +87,6 @@ If you need wrapper STT settings plus Codex args:
 python3 cli.py --stt-model base.en --model gpt-5 --approval never
 ```
 
-## Web UI mode (optional)
-
-```bash
-cd voice-codex-bridge
-source .venv/bin/activate
-uvicorn main:app --host 127.0.0.1 --port 8799 --reload
-```
-
-Open `http://127.0.0.1:8799`.
-
 ## Integration tests
 
 ```bash
@@ -106,10 +96,10 @@ python3 -m unittest discover -s tests -v
 
 ## Usage
 
-1. Set command (default `codex`) and click **Start Codex**.
-2. Hold **Hold To Talk** button, speak, then release.
-3. Review transcript. Additional recording turns append to the same transcript box so you can continue dictation before sending.
-4. Click **Send To Codex** (or enable auto-send) to send either the currently composed text or the latest chunk when auto-send is on.
+1. Run `./voice-codex`.
+2. Press the record key (default: `Ctrl+X`) to start/stop recording.
+3. Speak, stop recording, then continue speaking and stop again to append more to the draft.
+4. Press `Enter` in Codex once to send the composed prompt.
 
 ## Environment variables
 
