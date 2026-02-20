@@ -8,6 +8,7 @@
 import AVFoundation
 import Cocoa
 import CoreMediaIO
+import CoreImage
 import Network
 import SystemExtensions
 
@@ -29,6 +30,11 @@ class ViewController: NSViewController {
     private var hostBridgeDetailLabel: NSTextField!
     private var hostBridgeStartButton: NSButton!
     private var hostBridgeOpenButton: NSButton!
+    private var qrStatusLabel: NSTextField!
+    private var qrExpiryLabel: NSTextField!
+    private var qrImageView: NSImageView!
+    private var qrRegenerateButton: NSButton!
+    private var qrCopyPayloadButton: NSButton!
     private var resourceStatusBadge: NSTextField!
     private var phoneIdentityLabel: NSTextField!
     private var resourceIssuesLabel: NSTextField!
@@ -55,9 +61,14 @@ class ViewController: NSViewController {
     private var timer: Timer?
     private var propTimer: Timer?
     private var hostBridgeTimer: Timer?
+    private var qrExpiryTimer: Timer?
+    private var qrAutoRefreshTimer: Timer?
     private var hostBridgeIsRunning = false
     private var hostBridgeAutoStartAttempted = false
     private var latestHostResourceStatus: HostResourceStatus?
+    private var latestQrPayloadText: String?
+    private var latestQrExpiryDate: Date?
+    private var qrTokenRequestInFlight = false
     private var didSetInitialStatus = false
 
     func activateCamera() {
@@ -593,6 +604,8 @@ class ViewController: NSViewController {
         timer?.invalidate()
         propTimer?.invalidate()
         hostBridgeTimer?.invalidate()
+        qrExpiryTimer?.invalidate()
+        qrAutoRefreshTimer?.invalidate()
     }
 
 
@@ -602,6 +615,18 @@ private extension ViewController {
     static let logTimestampFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
+
+    static let qrISO8601Formatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return formatter
+    }()
+
+    static let qrISO8601FallbackFormatter: ISO8601DateFormatter = {
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime]
         return formatter
     }()
 
@@ -660,6 +685,9 @@ private extension ViewController {
                     self.hostBridgeDetailLabel.stringValue = "Host discovery + pairing service is running (port 8787 / UDP 39888)."
                     self.hostBridgeStartButton.title = "Restart Host Bridge"
                     self.refreshHostResourceStatus()
+                    if transitioned || self.latestQrPayloadText == nil {
+                        self.requestQrToken(manual: false)
+                    }
                     if transitioned {
                         self.showMessage("host bridge online at \(self.hostBridgeBaseURL.absoluteString)")
                     }
@@ -667,6 +695,7 @@ private extension ViewController {
                     self.updateHostBridgeBadge("Offline", color: .systemOrange)
                     self.hostBridgeDetailLabel.stringValue = "Host bridge is not running. Android cannot pair/discover until started."
                     self.hostBridgeStartButton.title = "Start Host Bridge"
+                    self.resetQrSection(bridgeOnline: false)
                     self.resetHostResourceSection(bridgeOnline: false)
                     if transitioned {
                         self.showMessage("host bridge offline")
@@ -725,6 +754,211 @@ private extension ViewController {
             showMessage("Opened host bridge UI at \(hostBridgeBaseURL.absoluteString)")
         } else {
             showMessage("Unable to open host bridge UI. Start Phone AV Bridge Host first.")
+        }
+    }
+
+    private func clearQrTimers() {
+        qrExpiryTimer?.invalidate()
+        qrExpiryTimer = nil
+        qrAutoRefreshTimer?.invalidate()
+        qrAutoRefreshTimer = nil
+    }
+
+    private func parseQrExpiryDate(_ rawValue: String?) -> Date? {
+        guard let raw = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
+            return nil
+        }
+        if let parsed = Self.qrISO8601Formatter.date(from: raw) {
+            return parsed
+        }
+        return Self.qrISO8601FallbackFormatter.date(from: raw)
+    }
+
+    private func imageFromQrDataUrl(_ dataUrl: String?) -> NSImage? {
+        guard let dataUrl = dataUrl, let commaIndex = dataUrl.firstIndex(of: ",") else {
+            return nil
+        }
+        let encoded = String(dataUrl[dataUrl.index(after: commaIndex)...])
+        guard let data = Data(base64Encoded: encoded, options: .ignoreUnknownCharacters) else {
+            return nil
+        }
+        return NSImage(data: data)
+    }
+
+    private func imageFromQrPayloadText(_ payloadText: String?) -> NSImage? {
+        guard let payloadText = payloadText, let data = payloadText.data(using: .utf8) else {
+            return nil
+        }
+        guard let filter = CIFilter(name: "CIQRCodeGenerator") else {
+            return nil
+        }
+        filter.setValue(data, forKey: "inputMessage")
+        filter.setValue("M", forKey: "inputCorrectionLevel")
+        guard let output = filter.outputImage else {
+            return nil
+        }
+
+        let transformed = output.transformed(by: CGAffineTransform(scaleX: 6, y: 6))
+        let rep = NSCIImageRep(ciImage: transformed)
+        let image = NSImage(size: rep.size)
+        image.addRepresentation(rep)
+        return image
+    }
+
+    private func formatQrRemaining(_ interval: TimeInterval) -> String {
+        let total = max(0, Int(interval.rounded(.up)))
+        let minutes = total / 60
+        let seconds = total % 60
+        return "\(minutes)m \(seconds)s"
+    }
+
+    @objc private func refreshQrExpiryLabelTick() {
+        guard let expiryDate = latestQrExpiryDate else {
+            qrExpiryLabel.stringValue = "Expiry: unknown"
+            return
+        }
+
+        let remaining = expiryDate.timeIntervalSinceNow
+        if remaining <= 0 {
+            qrExpiryLabel.stringValue = "Expiry: expired (refreshing)"
+            if hostBridgeIsRunning, !qrTokenRequestInFlight {
+                requestQrToken(manual: false)
+            }
+            return
+        }
+        qrExpiryLabel.stringValue = "Expiry: in \(formatQrRemaining(remaining))"
+    }
+
+    private func scheduleQrAutoRefresh() {
+        qrAutoRefreshTimer?.invalidate()
+        guard let expiryDate = latestQrExpiryDate else { return }
+        let refreshInterval = max(1.0, expiryDate.timeIntervalSinceNow - 5.0)
+        qrAutoRefreshTimer = Timer.scheduledTimer(
+            timeInterval: refreshInterval,
+            target: self,
+            selector: #selector(autoRefreshQrToken),
+            userInfo: nil,
+            repeats: false
+        )
+    }
+
+    private func applyQrToken(_ qrToken: [String: Any], manual: Bool) {
+        let payloadText = (qrToken["payloadText"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        latestQrPayloadText = (payloadText?.isEmpty == false) ? payloadText : nil
+        latestQrExpiryDate = parseQrExpiryDate(qrToken["expiresAt"] as? String)
+
+        if let image = imageFromQrDataUrl(qrToken["qrImageDataUrl"] as? String) {
+            qrImageView.image = image
+        } else if let image = imageFromQrPayloadText(latestQrPayloadText) {
+            qrImageView.image = image
+        } else {
+            qrImageView.image = nil
+        }
+
+        qrStatusLabel.stringValue = manual
+            ? "QR regenerated. Scan in Android: Pair via QR."
+            : "Scan in Android: Pair via QR."
+        qrCopyPayloadButton.isEnabled = latestQrPayloadText != nil
+        qrRegenerateButton.isEnabled = true
+        clearQrTimers()
+        refreshQrExpiryLabelTick()
+        qrExpiryTimer = Timer.scheduledTimer(
+            timeInterval: 1.0,
+            target: self,
+            selector: #selector(refreshQrExpiryLabelTick),
+            userInfo: nil,
+            repeats: true
+        )
+        scheduleQrAutoRefresh()
+
+        let token = (qrToken["token"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let tokenPreview = token.isEmpty ? "n/a" : "\(token.prefix(6))…"
+        let expiryText = (qrToken["expiresAt"] as? String) ?? "unknown"
+        showMessage("qr token ready token=\(tokenPreview) expires=\(expiryText)")
+    }
+
+    private func requestQrToken(manual: Bool) {
+        guard hostBridgeIsRunning else {
+            resetQrSection(bridgeOnline: false)
+            return
+        }
+        if qrTokenRequestInFlight {
+            return
+        }
+        qrTokenRequestInFlight = true
+        qrStatusLabel.stringValue = manual ? "Regenerating QR token…" : "Generating QR token…"
+        qrRegenerateButton.isEnabled = false
+
+        var request = URLRequest(url: hostBridgeBaseURL.appendingPathComponent("api/bootstrap/qr-token"))
+        request.httpMethod = "POST"
+        request.timeoutInterval = 2.0
+        URLSession.shared.dataTask(with: request) { data, response, error in
+            DispatchQueue.main.async {
+                self.qrTokenRequestInFlight = false
+                self.qrRegenerateButton.isEnabled = self.hostBridgeIsRunning
+                if let error = error {
+                    self.qrStatusLabel.stringValue = "Failed to generate QR token."
+                    self.qrExpiryLabel.stringValue = "Check host bridge logs and retry."
+                    self.showMessage("qr token request failed: \(error.localizedDescription)")
+                    return
+                }
+                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                    self.qrStatusLabel.stringValue = "Failed to generate QR token (HTTP \(http.statusCode))."
+                    self.qrExpiryLabel.stringValue = "Check host bridge status and retry."
+                    self.showMessage("qr token request returned HTTP \(http.statusCode)")
+                    return
+                }
+                guard
+                    let data = data,
+                    let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                    let qrToken = root["qrToken"] as? [String: Any]
+                else {
+                    self.qrStatusLabel.stringValue = "QR token response malformed."
+                    self.qrExpiryLabel.stringValue = "Try regenerating QR."
+                    self.showMessage("qr token request returned invalid payload")
+                    return
+                }
+                self.applyQrToken(qrToken, manual: manual)
+            }
+        }.resume()
+    }
+
+    @objc func regenerateQrToken(_ sender: Any?) {
+        requestQrToken(manual: true)
+    }
+
+    @objc func autoRefreshQrToken() {
+        requestQrToken(manual: false)
+    }
+
+    @objc func copyQrPayload(_ sender: Any?) {
+        guard let payloadText = latestQrPayloadText else {
+            qrStatusLabel.stringValue = "No QR payload available to copy."
+            return
+        }
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let ok = pasteboard.setString(payloadText, forType: .string)
+        if ok {
+            qrStatusLabel.stringValue = "QR payload copied to clipboard."
+        } else {
+            qrStatusLabel.stringValue = "Clipboard copy failed."
+        }
+    }
+
+    func resetQrSection(bridgeOnline: Bool) {
+        clearQrTimers()
+        latestQrPayloadText = nil
+        latestQrExpiryDate = nil
+        qrImageView.image = nil
+        qrCopyPayloadButton.isEnabled = false
+        qrRegenerateButton.isEnabled = bridgeOnline
+        if bridgeOnline {
+            qrStatusLabel.stringValue = "Generating QR token…"
+            qrExpiryLabel.stringValue = "Expiry: waiting"
+        } else {
+            qrStatusLabel.stringValue = "Host bridge offline. Start host bridge to generate QR."
+            qrExpiryLabel.stringValue = "Expiry: unavailable"
         }
     }
 
@@ -996,6 +1230,66 @@ private extension ViewController {
         hostStack.addArrangedSubview(hostBridgeDetailLabel)
         hostStack.addArrangedSubview(hostControlsRow)
 
+        let qrContainer = NSStackView()
+        qrContainer.orientation = .horizontal
+        qrContainer.alignment = .top
+        qrContainer.spacing = 12
+
+        qrImageView = NSImageView()
+        qrImageView.wantsLayer = true
+        qrImageView.layer?.borderWidth = 1
+        qrImageView.layer?.borderColor = NSColor.separatorColor.cgColor
+        qrImageView.layer?.cornerRadius = 10
+        qrImageView.imageScaling = .scaleProportionallyUpOrDown
+        qrImageView.imageAlignment = .alignCenter
+        qrImageView.translatesAutoresizingMaskIntoConstraints = false
+        NSLayoutConstraint.activate([
+            qrImageView.widthAnchor.constraint(equalToConstant: 172),
+            qrImageView.heightAnchor.constraint(equalToConstant: 172),
+        ])
+
+        let qrInfoStack = NSStackView()
+        qrInfoStack.orientation = .vertical
+        qrInfoStack.spacing = 4
+
+        let qrTitleLabel = NSTextField(labelWithString: "Phone Pairing QR")
+        qrTitleLabel.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
+        qrTitleLabel.textColor = .labelColor
+
+        qrStatusLabel = NSTextField(labelWithString: "Checking host bridge...")
+        qrStatusLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+        qrStatusLabel.textColor = .secondaryLabelColor
+        qrStatusLabel.lineBreakMode = .byWordWrapping
+        qrStatusLabel.maximumNumberOfLines = 2
+
+        qrExpiryLabel = NSTextField(labelWithString: "Expiry: unknown")
+        qrExpiryLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
+        qrExpiryLabel.textColor = .secondaryLabelColor
+
+        let qrButtonsRow = NSStackView()
+        qrButtonsRow.orientation = .horizontal
+        qrButtonsRow.spacing = 8
+
+        qrRegenerateButton = NSButton(title: "Regenerate QR", target: self, action: #selector(regenerateQrToken(_:)))
+        qrRegenerateButton.bezelStyle = .rounded
+        qrRegenerateButton.controlSize = .regular
+
+        qrCopyPayloadButton = NSButton(title: "Copy Payload", target: self, action: #selector(copyQrPayload(_:)))
+        qrCopyPayloadButton.bezelStyle = .texturedRounded
+        qrCopyPayloadButton.controlSize = .regular
+
+        qrButtonsRow.addArrangedSubview(qrRegenerateButton)
+        qrButtonsRow.addArrangedSubview(qrCopyPayloadButton)
+
+        qrInfoStack.addArrangedSubview(qrTitleLabel)
+        qrInfoStack.addArrangedSubview(qrStatusLabel)
+        qrInfoStack.addArrangedSubview(qrExpiryLabel)
+        qrInfoStack.addArrangedSubview(qrButtonsRow)
+
+        qrContainer.addArrangedSubview(qrImageView)
+        qrContainer.addArrangedSubview(qrInfoStack)
+        hostStack.addArrangedSubview(qrContainer)
+
         let divider = NSBox()
         divider.boxType = .separator
         hostStack.addArrangedSubview(divider)
@@ -1096,6 +1390,7 @@ private extension ViewController {
         hostStack.addArrangedSubview(orientationRow)
         hostStack.addArrangedSubview(resourceControlsRow)
         updateHostBridgeBadge("Offline", color: .systemOrange)
+        resetQrSection(bridgeOnline: false)
         resetHostResourceSection(bridgeOnline: false)
 
         let statusCard = NSBox()

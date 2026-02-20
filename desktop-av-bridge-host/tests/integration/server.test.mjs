@@ -21,6 +21,9 @@ test('server status and pair/toggle flow works in mock mode', async () => {
   try {
     let result = await request('/api/bootstrap');
     assert.equal(result.response.status, 200);
+    assert.match(result.payload.bootstrap.hostId, /^host-[a-z0-9]{8,40}$/);
+    assert.equal(typeof result.payload.bootstrap.displayName, 'string');
+    assert.equal(typeof result.payload.bootstrap.platform, 'string');
     assert.ok(result.payload.bootstrap.pairingCode.startsWith('PAIR-'));
 
     const pairCode = result.payload.bootstrap.pairingCode;

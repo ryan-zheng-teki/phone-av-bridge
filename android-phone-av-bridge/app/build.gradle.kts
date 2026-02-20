@@ -67,6 +67,8 @@ dependencies {
   implementation("com.google.android.material:material:1.12.0")
   implementation("androidx.constraintlayout:constraintlayout:2.1.4")
   implementation("androidx.lifecycle:lifecycle-runtime-ktx:2.8.4")
+  implementation("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
+  implementation("com.journeyapps:zxing-android-embedded:4.3.0")
   implementation("com.github.pedroSG94:RTSP-Server:1.2.8")
   implementation("com.github.pedroSG94.RootEncoder:library:2.4.5")
 

@@ -7,7 +7,7 @@
     <string name="status_connected_degraded">Status: Paired (host sync issue)</string>
     <string name="status_pairing">Status: Pairing in progress…</string>
     <string name="status_pairing_failed">Status: Pairing failed</string>
-    <string name="status_detail_disconnected">Tap Pair Host to find the host app on your network.</string>
+    <string name="status_detail_disconnected">Tap Pair Host or Scan QR to connect to a host app.</string>
     <string name="status_detail_discovered_host">Host detected. Tap Pair Host to connect now.</string>
     <string name="status_detail_paired">Host connected. You can now enable any resource below.</string>
     <string name="status_detail_degraded">Host is paired but currently unreachable or has route issues.</string>
@@ -20,9 +20,14 @@
     <string name="host_summary">%1$s\nPhone name on host: %2$s</string>
     <string name="issues_none">Issues: none</string>
     <string name="issues_prefix">Issues: %1$s</string>
-    <string name="steps">Steps:\n1. Open Phone AV Bridge Host on your computer.\n2. Tap Pair Host.\n3. Enable Camera, Microphone, or Speaker here on phone.\n4. If Camera is enabled, choose Front/Back lens and Orientation mode on phone.</string>
+    <string name="steps">Steps:\n1. Open Phone AV Bridge Host on your computer.\n2. Tap Pair Host (LAN discovery) or Scan QR (explicit host).\n3. Enable Camera, Microphone, or Speaker here on phone.\n4. If Camera is enabled, choose Front/Back lens and Orientation mode on phone.</string>
     <string name="pair_button">Pair Host</string>
     <string name="unpair_button">Unpair Host</string>
+    <string name="scan_qr_button">Scan QR Pairing</string>
+    <string name="scan_qr_prompt">Align QR code inside the frame</string>
+    <string name="scan_qr_invalid">Invalid QR code. Scan a Phone AV Bridge pairing QR code.</string>
+    <string name="scan_qr_requires_unpair">Unpair current host before scanning a new QR code.</string>
+    <string name="select_host_title">Select Host to Pair</string>
     <string name="toggle_camera">Enable Camera</string>
     <string name="toggle_microphone">Enable Microphone</string>
     <string name="toggle_speaker">Enable Speaker</string>
@@ -40,6 +45,7 @@
     <string name="pair_failed_discovery">Pair failed: host not found. Ensure Phone AV Bridge Host is open and on the same network.</string>
     <string name="pair_failed_unreachable">Pair failed: host discovered but not reachable. Check network/firewall.</string>
     <string name="pair_failed_rejected">Pair failed: host rejected pair code. Restart host app and retry.</string>
+    <string name="pair_failed_qr_token">Pair failed: QR token expired or already used. Generate a fresh QR code and retry.</string>
     <string name="pair_failed_unknown">Pair failed: unexpected host error. Retry once after reopening host app.</string>
     <string name="permission_denied_generic">Required permission denied.</string>
     <string name="camera_permission_denied">Camera permission denied.</string>

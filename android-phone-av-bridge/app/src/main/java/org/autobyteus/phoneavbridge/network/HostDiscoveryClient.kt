@@ -6,6 +6,8 @@ import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.NetworkInterface
+import java.net.SocketTimeoutException
+import java.util.Locale
 
 class HostDiscoveryClient {
   companion object {
@@ -14,9 +16,13 @@ class HostDiscoveryClient {
   }
 
   fun discover(timeoutMs: Int = 2000): DiscoveredHost? {
+    return discoverAll(timeoutMs).firstOrNull()
+  }
+
+  fun discoverAll(timeoutMs: Int = 2000): List<DiscoveredHost> {
+    val safeTimeoutMs = timeoutMs.coerceAtLeast(200)
     val socket = DatagramSocket()
     socket.broadcast = true
-    socket.soTimeout = timeoutMs
 
     return try {
       val payload = DISCOVERY_MAGIC.toByteArray(Charsets.UTF_8)
@@ -27,26 +33,65 @@ class HostDiscoveryClient {
         socket.send(packet)
       }
 
+      val deadline = System.currentTimeMillis() + safeTimeoutMs
       val receiveBuffer = ByteArray(2048)
-      val response = DatagramPacket(receiveBuffer, receiveBuffer.size)
-      socket.receive(response)
+      val discovered = linkedMapOf<String, DiscoveredHost>()
 
-      val text = String(response.data, 0, response.length, Charsets.UTF_8)
-      val json = JSONObject(text)
-      if (json.optString("service") != "phone-av-bridge") {
-        return null
+      while (System.currentTimeMillis() < deadline) {
+        val remaining = (deadline - System.currentTimeMillis()).coerceAtLeast(50L).toInt()
+        socket.soTimeout = remaining
+        val response = DatagramPacket(receiveBuffer, receiveBuffer.size)
+
+        try {
+          socket.receive(response)
+        } catch (_: SocketTimeoutException) {
+          break
+        }
+
+        val host = parseResponse(response) ?: continue
+        discovered[host.baseUrl] = host
       }
 
-      val host = json.getString("host")
-      val port = json.getInt("port")
-      val pairingCode = json.getString("pairingCode")
-      val baseUrl = json.optString("baseUrl", "http://$host:$port")
-      DiscoveredHost(baseUrl = baseUrl.removeSuffix("/"), pairingCode = pairingCode)
+      discovered.values
+        .sortedWith(
+          compareBy(
+            { it.displayName?.lowercase(Locale.ROOT).orEmpty() },
+            { it.baseUrl.lowercase(Locale.ROOT) },
+          ),
+        )
     } catch (_: Exception) {
-      null
+      emptyList()
     } finally {
       socket.close()
     }
+  }
+
+  private fun parseResponse(response: DatagramPacket): DiscoveredHost? {
+    val text = String(response.data, 0, response.length, Charsets.UTF_8)
+    val json = JSONObject(text)
+    if (json.optString("service") != "phone-av-bridge") {
+      return null
+    }
+
+    val host = json.optString("host").trim()
+    val port = json.optInt("port", 0)
+    val pairingCode = json.optString("pairingCode").trim()
+    if (host.isBlank() || port <= 0 || pairingCode.isBlank()) {
+      return null
+    }
+
+    val resolvedBaseUrl = json.optString("baseUrl", "http://$host:$port").trim().removeSuffix("/")
+    if (resolvedBaseUrl.isBlank()) {
+      return null
+    }
+
+    return DiscoveredHost(
+      baseUrl = resolvedBaseUrl,
+      pairingCode = pairingCode,
+      hostId = json.optString("hostId").takeIf { it.isNotBlank() },
+      displayName = json.optString("displayName").takeIf { it.isNotBlank() },
+      platform = json.optString("platform").takeIf { it.isNotBlank() },
+    )
   }
 
   private fun buildDiscoveryTargets(): List<InetAddress> {

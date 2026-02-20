@@ -55,11 +55,13 @@ npm run build:release
 ```
 
 Host runtime endpoints:
-- `GET /api/bootstrap` (pairing code + base URL)
+- `GET /api/bootstrap` (pairing code + base URL + host metadata)
+- `POST /api/bootstrap/qr-token` (issue one-time QR token payload)
+- `POST /api/bootstrap/qr-redeem` (redeem one-time QR token to bootstrap)
 - `POST /api/pair`
 - `POST /api/presence` (pre-pair phone identity heartbeat)
 - `POST /api/toggles`
-- UDP discovery probe message: `PHONE_AV_BRIDGE_DISCOVER_V1` on port `39888`
+- UDP discovery flow on port `39888`: Android sends probe `PHONE_AV_BRIDGE_DISCOVER_V1`, host replies with bootstrap JSON.
 
 ### Android app
 
@@ -73,8 +75,11 @@ cd android-phone-av-bridge
 1. Install host app with `desktop-av-bridge-host/installers/linux/install.sh`.
 2. Launch `Phone AV Bridge Host` from app menu (or `~/.local/bin/phone-av-bridge-host-start`).
 3. Install Android APK and open `Phone AV Bridge`.
-4. Tap `Pair Host`, then enable `Camera`, `Microphone`, and/or `Speaker`.
-5. In Zoom/meeting app on Linux:
+4. In Android app, either:
+   - tap `Pair Host` to discover hosts on LAN (single host quick-pair, multi-host explicit selection), or
+   - tap `Scan QR Pairing` to pair explicitly with a host-generated QR token.
+5. Enable `Camera`, `Microphone`, and/or `Speaker`.
+6. In Zoom/meeting app on Linux:
    - in compatibility mode, select camera device `AutoByteusPhoneCamera`,
    - select the virtual mic source matching `PhoneAVBridgeMicInput-<phone>-<id>` (fallback may appear as `Monitor of PhoneAVBridgeMic-<phone>-<id>`),
    - for phone speaker playback, host now avoids bridge mic sources by default; if needed, set `LINUX_SPEAKER_CAPTURE_SOURCE` to force a specific source.
@@ -95,15 +100,17 @@ Notes:
 2. Install `PhoneAVBridgeCamera.app` into `/Applications` and launch it.
 3. `Phone AV Bridge Camera` auto-starts `Phone AV Bridge Host` in the background (when installed), and shows host bridge status in-app.
 4. Install Android APK and open `Phone AV Bridge`.
-5. Tap `Pair Host`, then enable `Camera` and/or `Microphone` on phone.
-6. If camera is enabled, choose `Front` or `Back` lens on phone.
-7. In Zoom/meeting app on macOS:
+5. In Android app, either tap `Pair Host` (LAN discovery + host selection) or `Scan QR Pairing` (explicit host via QR token).
+6. Enable `Camera` and/or `Microphone` on phone.
+7. If camera is enabled, choose `Front` or `Back` lens on phone.
+8. In Zoom/meeting app on macOS:
    - select `Phone AV Bridge Camera` as camera input,
    - select `PhoneAVBridgeAudio 2ch` as microphone input,
    - for phone speaker playback, route macOS output to `PhoneAVBridgeAudio 2ch` (or a Multi-Output device that includes it).
 
 Notes:
 - Host pairing identity is persisted at `~/.phone-av-bridge-host/state.json`.
+- Host UI now shows QR pairing code automatically and supports one-click `Regenerate QR Code`.
 - On first camera use, macOS requires one-time camera extension approval in `System Settings -> General -> Login Items & Extensions -> Camera Extensions`.
 - If `PhoneAVBridgeCamera.app` was downloaded from GitHub Releases, remove quarantine after copying to `/Applications`:
   `sudo xattr -dr com.apple.quarantine /Applications/PhoneAVBridgeCamera.app`

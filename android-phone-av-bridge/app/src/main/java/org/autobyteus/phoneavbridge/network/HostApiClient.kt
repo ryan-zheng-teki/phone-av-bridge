@@ -40,6 +40,27 @@ class HostApiClient {
     return DiscoveredHost(
       baseUrl = normalizeBaseUrl(resolvedBaseUrl),
       pairingCode = pairingCode,
+      hostId = bootstrap.optString("hostId").takeIf { it.isNotBlank() },
+      displayName = bootstrap.optString("displayName").takeIf { it.isNotBlank() },
+      platform = bootstrap.optString("platform").takeIf { it.isNotBlank() },
+    )
+  }
+
+  fun redeemQrToken(baseUrl: String, token: String): DiscoveredHost {
+    val payload = request(
+      "POST",
+      "${normalizeBaseUrl(baseUrl)}/api/bootstrap/qr-redeem",
+      JSONObject().put("token", token.trim()),
+    )
+    val bootstrap = payload.getJSONObject("bootstrap")
+    val pairingCode = bootstrap.getString("pairingCode")
+    val resolvedBaseUrl = bootstrap.optString("baseUrl", normalizeBaseUrl(baseUrl))
+    return DiscoveredHost(
+      baseUrl = normalizeBaseUrl(resolvedBaseUrl),
+      pairingCode = pairingCode,
+      hostId = bootstrap.optString("hostId").takeIf { it.isNotBlank() },
+      displayName = bootstrap.optString("displayName").takeIf { it.isNotBlank() },
+      platform = bootstrap.optString("platform").takeIf { it.isNotBlank() },
     )
   }
 

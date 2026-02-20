@@ -12,6 +12,83 @@ async function api(path, method = 'GET', body) {
 }
 
 let refreshPromise = null;
+let latestQrPayloadText = '';
+let latestQrExpiresAt = null;
+let qrCountdownInterval = null;
+let qrAutoRefreshTimeout = null;
+
+function clearQrTimers() {
+  if (qrCountdownInterval) {
+    clearInterval(qrCountdownInterval);
+    qrCountdownInterval = null;
+  }
+  if (qrAutoRefreshTimeout) {
+    clearTimeout(qrAutoRefreshTimeout);
+    qrAutoRefreshTimeout = null;
+  }
+}
+
+function updateQrMeta() {
+  const meta = document.getElementById('qrMetaText');
+  if (!latestQrExpiresAt) {
+    meta.textContent = 'QR code is not generated yet.';
+    return;
+  }
+  const remainingMs = latestQrExpiresAt - Date.now();
+  if (remainingMs <= 0) {
+    meta.textContent = 'QR expired. Regenerating…';
+    return;
+  }
+  const remainingSeconds = Math.ceil(remainingMs / 1000);
+  meta.textContent = `QR active. Expires in ${remainingSeconds}s.`;
+}
+
+function scheduleQrRefresh() {
+  if (!latestQrExpiresAt) {
+    return;
+  }
+  const refreshAtMs = Math.max(1000, latestQrExpiresAt - Date.now() - 5000);
+  qrAutoRefreshTimeout = setTimeout(() => {
+    generateQrToken({ auto: true }).catch((error) => {
+      document.getElementById('qrMetaText').textContent = `Auto-refresh failed: ${error.message}`;
+    });
+  }, refreshAtMs);
+}
+
+function renderQrToken(qrToken) {
+  const qrPayload = qrToken.payload || {};
+  const qrPayloadText = qrToken.payloadText || JSON.stringify(qrPayload);
+  latestQrPayloadText = qrPayloadText;
+
+  const expiresAt = Date.parse(qrToken.expiresAt || '');
+  latestQrExpiresAt = Number.isFinite(expiresAt) ? expiresAt : null;
+  clearQrTimers();
+  updateQrMeta();
+  qrCountdownInterval = setInterval(updateQrMeta, 1000);
+  scheduleQrRefresh();
+
+  const info = [
+    `expiresAt: ${qrToken.expiresAt || 'unknown'}`,
+    `token: ${qrToken.token || 'unknown'}`,
+    `payload: ${qrPayloadText}`,
+  ].join('\n');
+  document.getElementById('qrTokenOut').textContent = info;
+
+  const qrImage = document.getElementById('qrImage');
+  qrImage.src = qrToken.qrImageDataUrl || `https://quickchart.io/qr?size=360&text=${encodeURIComponent(qrPayloadText)}`;
+  qrImage.style.display = 'block';
+  document.getElementById('copyQrPayloadBtn').disabled = false;
+}
+
+async function generateQrToken({ auto = false } = {}) {
+  const payload = await api('/api/bootstrap/qr-token', 'POST');
+  const qrToken = payload.qrToken || {};
+  renderQrToken(qrToken);
+  if (!auto) {
+    document.getElementById('qrMetaText').textContent = 'QR regenerated successfully.';
+    setTimeout(updateQrMeta, 1200);
+  }
+}
 
 async function loadBootstrap() {
   const payload = await api('/api/bootstrap');
@@ -97,6 +174,7 @@ async function refresh() {
 
 async function setup() {
   await loadBootstrap();
+  document.getElementById('copyQrPayloadBtn').disabled = true;
 
   document.getElementById('pairBtn').addEventListener('click', async () => {
     const pairCode = document.getElementById('pairCode').value.trim();
@@ -113,6 +191,25 @@ async function setup() {
     const payload = await api('/api/preflight', 'POST');
     document.getElementById('preflightOut').textContent = JSON.stringify(payload.preflight, null, 2);
   });
+
+  document.getElementById('qrTokenBtn').addEventListener('click', async () => {
+    await generateQrToken();
+  });
+
+  document.getElementById('copyQrPayloadBtn').addEventListener('click', async () => {
+    if (!latestQrPayloadText) {
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(latestQrPayloadText);
+      document.getElementById('qrMetaText').textContent = 'QR payload copied to clipboard.';
+      setTimeout(updateQrMeta, 1200);
+    } catch (error) {
+      document.getElementById('qrMetaText').textContent = `Clipboard copy failed: ${error.message}`;
+    }
+  });
+
+  await generateQrToken({ auto: true });
 
   await refresh();
 

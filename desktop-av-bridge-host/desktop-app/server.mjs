@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import QRCode from 'qrcode';
 import { SessionController } from '../core/session-controller.mjs';
 import { runPreflight } from '../core/preflight-service.mjs';
 import { LinuxCameraBridgeRunner, MockCameraAdapter } from '../adapters/linux-camera/bridge-runner.mjs';
@@ -17,6 +18,8 @@ const __dirname = path.dirname(__filename);
 const staticRoot = path.join(__dirname, 'static');
 const DISCOVERY_MAGIC = 'PHONE_AV_BRIDGE_DISCOVER_V1';
 const DEFAULT_STATE_FILE = path.join(os.homedir(), '.phone-av-bridge-host', 'state.json');
+const DEFAULT_QR_TOKEN_TTL_MS = 2 * 60 * 1000;
+const DEFAULT_QR_IMAGE_SIZE = 360;
 
 function resolveAdvertisedHost(bindHost) {
   if (bindHost !== '0.0.0.0') {
@@ -39,6 +42,18 @@ function generatePairingCode() {
   return `PAIR-${digits}`;
 }
 
+function generateHostId() {
+  return `host-${crypto.randomBytes(8).toString('hex')}`;
+}
+
+function normalizeHostId(value) {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  return /^host-[a-z0-9]{8,40}$/.test(normalized) ? normalized : null;
+}
+
 function normalizePairingCode(value) {
   if (typeof value !== 'string') {
     return null;
@@ -57,11 +72,13 @@ async function readPersistedState(stateFilePath) {
     const content = await fs.readFile(stateFilePath, 'utf8');
     const parsed = JSON.parse(content);
     const pairingCode = normalizePairingCode(parsed?.pairingCode);
+    const hostId = normalizeHostId(parsed?.hostId);
     const paired = parsed?.paired === true;
     const deviceName = typeof parsed?.phone?.deviceName === 'string' ? parsed.phone.deviceName.trim() : '';
     const deviceId = typeof parsed?.phone?.deviceId === 'string' ? parsed.phone.deviceId.trim() : '';
     return {
       pairingCode,
+      hostId,
       paired,
       phone: {
         deviceName: deviceName || null,
@@ -76,6 +93,7 @@ async function readPersistedState(stateFilePath) {
 async function writePersistedState(stateFilePath, snapshot) {
   const payload = {
     pairingCode: snapshot.pairingCode,
+    hostId: snapshot.hostId,
     paired: !!snapshot.paired,
     phone: {
       deviceName: snapshot.phone?.deviceName || null,
@@ -209,17 +227,93 @@ export function createApp({
   port = 8787,
   advertisedHost = '',
   pairingCode = generatePairingCode(),
+  hostId = generateHostId(),
+  displayName = os.hostname(),
+  platform = process.env.HOST_PLATFORM || process.platform,
+  qrTokenTtlMs = DEFAULT_QR_TOKEN_TTL_MS,
 } = {}) {
   const controller = createController({ useMockAdapters });
   let preflightReport = null;
+  const qrTokenRegistry = new Map();
   const hostForClients = (advertisedHost || '').trim() || resolveAdvertisedHost(host);
   const bootstrap = {
     service: 'phone-av-bridge',
+    hostId,
+    displayName: displayName || hostForClients,
+    platform,
     host: hostForClients,
     port,
     pairingCode,
     baseUrl: `http://${hostForClients}:${port}`,
   };
+
+  function cleanupQrTokens(now = Date.now()) {
+    for (const [token, entry] of qrTokenRegistry.entries()) {
+      if (!entry || Number.isNaN(entry.expiresAt) || entry.expiresAt <= now) {
+        qrTokenRegistry.delete(token);
+      }
+    }
+  }
+
+  async function issueQrToken() {
+    const now = Date.now();
+    cleanupQrTokens(now);
+    const token = crypto.randomBytes(24).toString('base64url');
+    const expiresAt = now + Math.max(1000, Number(qrTokenTtlMs) || DEFAULT_QR_TOKEN_TTL_MS);
+    qrTokenRegistry.set(token, { expiresAt, used: false });
+    const payload = {
+      service: 'phone-av-bridge',
+      version: 1,
+      token,
+      baseUrl: bootstrap.baseUrl,
+      hostId: bootstrap.hostId,
+      displayName: bootstrap.displayName,
+    };
+    const payloadText = JSON.stringify(payload);
+    let qrImageDataUrl = null;
+    try {
+      qrImageDataUrl = await QRCode.toDataURL(payloadText, {
+        errorCorrectionLevel: 'M',
+        margin: 1,
+        width: DEFAULT_QR_IMAGE_SIZE,
+      });
+    } catch {
+      qrImageDataUrl = null;
+    }
+
+    return {
+      token,
+      expiresAt: new Date(expiresAt).toISOString(),
+      payload,
+      payloadText,
+      qrImageDataUrl,
+    };
+  }
+
+  function redeemQrToken(token) {
+    const normalized = typeof token === 'string' ? token.trim() : '';
+    if (!normalized) {
+      throw new Error('QR token is required.');
+    }
+    const now = Date.now();
+    cleanupQrTokens(now);
+    const entry = qrTokenRegistry.get(normalized);
+    if (!entry) {
+      throw new Error('QR token is invalid or expired.');
+    }
+    if (entry.used) {
+      throw new Error('QR token has already been used.');
+    }
+    if (entry.expiresAt <= now) {
+      qrTokenRegistry.delete(normalized);
+      throw new Error('QR token is invalid or expired.');
+    }
+    entry.used = true;
+    qrTokenRegistry.set(normalized, entry);
+    return {
+      bootstrap,
+    };
+  }
 
   const server = http.createServer(async (req, res) => {
     try {
@@ -242,6 +336,26 @@ export function createApp({
 
       if (req.method === 'GET' && req.url === '/api/bootstrap') {
         return jsonResponse(res, 200, { bootstrap });
+      }
+
+      if (req.method === 'POST' && req.url === '/api/bootstrap/qr-token') {
+        const qrToken = await issueQrToken();
+        console.log(`[qr] issued token exp=${qrToken.expiresAt} host=${bootstrap.baseUrl} remote=${req.socket.remoteAddress || 'unknown'}`);
+        return jsonResponse(res, 200, { qrToken });
+      }
+
+      if (req.method === 'POST' && req.url === '/api/bootstrap/qr-redeem') {
+        const body = await readBody(req);
+        const tokenPreview = typeof body.token === 'string' ? `${body.token.slice(0, 6)}…` : 'none';
+        let redeemed;
+        try {
+          redeemed = redeemQrToken(body.token);
+        } catch (error) {
+          console.warn(`[qr] redeem failed token=${tokenPreview} remote=${req.socket.remoteAddress || 'unknown'} error=${error.message}`);
+          throw error;
+        }
+        console.log(`[qr] redeem success token=${tokenPreview} remote=${req.socket.remoteAddress || 'unknown'} baseUrl=${redeemed.bootstrap.baseUrl}`);
+        return jsonResponse(res, 200, redeemed);
       }
 
       if (req.method === 'POST' && req.url === '/api/preflight') {
@@ -296,6 +410,7 @@ export function createApp({
 
       return jsonResponse(res, 404, { error: 'Not found' });
     } catch (error) {
+      console.warn(`[http] ${req.method} ${req.url} failed: ${error.message || 'Request failed'}`);
       return jsonResponse(res, 400, { error: error.message || 'Request failed' });
     }
   });
@@ -310,11 +425,15 @@ export async function startServer({
   useMockAdapters = false,
   enableDiscovery = true,
   discoveryPort = 39888,
+  qrTokenTtlMs = DEFAULT_QR_TOKEN_TTL_MS,
 } = {}) {
   const persistenceEnabled = !useMockAdapters && process.env.PERSIST_STATE !== '0';
   const stateFilePath = resolveStateFilePath();
   const persistedState = persistenceEnabled ? await readPersistedState(stateFilePath) : null;
   const pairingCode = persistedState?.pairingCode || generatePairingCode();
+  const hostId = persistedState?.hostId || generateHostId();
+  const displayName = (process.env.HOST_DISPLAY_NAME || '').trim() || os.hostname();
+  const platform = process.env.HOST_PLATFORM || process.platform;
 
   const { server, bootstrap, controller } = createApp({
     useMockAdapters,
@@ -322,6 +441,10 @@ export async function startServer({
     port,
     advertisedHost,
     pairingCode,
+    hostId,
+    displayName,
+    platform,
+    qrTokenTtlMs,
   });
 
   if (persistedState?.paired) {
@@ -344,6 +467,7 @@ export async function startServer({
           const status = controller.getStatus();
           await writePersistedState(stateFilePath, {
             pairingCode,
+            hostId,
             paired: status.paired,
             phone: status.phone,
           });

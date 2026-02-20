@@ -63,7 +63,15 @@ Then open `http://127.0.0.1:8787`.
 
 - HTTP bootstrap endpoint: `GET /api/bootstrap`
 - UDP discovery probe payload: `PHONE_AV_BRIDGE_DISCOVER_V1`
-- Host returns `baseUrl` and one-time startup `pairingCode`
+- Discovery direction: Android broadcasts probe UDP packet, host replies with bootstrap JSON to requester address.
+- Host bootstrap includes `baseUrl`, startup `pairingCode`, and host identity (`hostId`, `displayName`, `platform`).
+- QR pairing endpoints:
+  - `POST /api/bootstrap/qr-token` issues single-use token payload (`token`, `expiresAt`, payload JSON),
+  - `POST /api/bootstrap/qr-redeem` redeems token and returns bootstrap.
+- Host UI behavior:
+  - QR code is generated automatically when host UI loads,
+  - QR auto-refreshes shortly before expiry,
+  - `Regenerate QR Code` lets user issue a fresh token immediately.
 - Pairing code is persisted across host restarts by default (can be disabled with `PERSIST_STATE=0`).
 - Pairing endpoint requires matching code: `POST /api/pair`
 - Presence endpoint for pre-pair phone identity updates: `POST /api/presence`
@@ -109,6 +117,10 @@ Then open `http://127.0.0.1:8787`.
 - App shows explicit host status and status detail (`Not paired`, `Pairing`, `Paired and ready`, `Paired with host sync issue`).
 - App shows host summary and active issues returned by host status API.
 - While unpaired, Android now shows discovered host preview (`Host discovered: ...`) before user taps Pair.
+- `Pair Host` now uses explicit pairing behavior:
+  - 1 discovered host: quick pair after explicit tap,
+  - multiple discovered hosts: Android shows host picker and user selects target host.
+- Android also supports explicit QR path (`Scan QR Pairing`) by scanning host-generated QR payload and redeeming one-time token.
 - Host keeps last-seen/nearby phone identity in status while unpaired, so macOS host UI can show the phone before pair completion.
 - Pairing failures are categorized into:
   - discovery failure,

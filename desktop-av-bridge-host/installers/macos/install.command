@@ -67,11 +67,14 @@ unset HOST || true
 
 mkdir -p "${LOG_DIR}"
 
-if [[ -x "${RUNTIME_NODE}" ]]; then
+NODE_BIN=""
+if [[ -x "${RUNTIME_NODE}" ]] && "${RUNTIME_NODE}" -v >/dev/null 2>&1; then
   NODE_BIN="${RUNTIME_NODE}"
 elif command -v node >/dev/null 2>&1; then
   NODE_BIN="$(command -v node)"
-else
+fi
+
+if [[ -z "${NODE_BIN}" ]]; then
   osascript -e 'display alert "Phone AV Bridge Host" message "Node.js runtime is missing. Reinstall the app package." as critical'
   exit 1
 fi

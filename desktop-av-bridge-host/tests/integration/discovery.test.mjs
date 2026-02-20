@@ -42,6 +42,10 @@ test('udp discovery responds with bootstrap payload', async () => {
 
     const payload = JSON.parse(response);
     assert.equal(payload.service, 'phone-av-bridge');
+    assert.match(payload.hostId, /^host-[a-z0-9]{8,40}$/);
+    assert.equal(typeof payload.displayName, 'string');
+    assert.ok(payload.displayName.length > 0);
+    assert.equal(typeof payload.platform, 'string');
     assert.equal(payload.port, PORT);
     assert.ok(payload.pairingCode.startsWith('PAIR-'));
   } finally {

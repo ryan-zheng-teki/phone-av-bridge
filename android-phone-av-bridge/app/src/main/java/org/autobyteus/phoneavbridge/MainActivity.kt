@@ -10,8 +10,11 @@ import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
+import com.journeyapps.barcodescanner.ScanContract
+import com.journeyapps.barcodescanner.ScanOptions
 import com.google.android.material.materialswitch.MaterialSwitch
 import org.autobyteus.phoneavbridge.device.DeviceIdentityResolver
 import org.autobyteus.phoneavbridge.model.CameraLens
@@ -22,6 +25,7 @@ import org.autobyteus.phoneavbridge.model.ResourceToggleState
 import org.autobyteus.phoneavbridge.network.HostApiClient
 import org.autobyteus.phoneavbridge.network.HostDiscoveryClient
 import org.autobyteus.phoneavbridge.network.LanAddressResolver
+import org.autobyteus.phoneavbridge.network.QrPairPayloadParser
 import org.autobyteus.phoneavbridge.service.ResourceService
 import org.autobyteus.phoneavbridge.session.BridgeSessionStateMachine
 import org.autobyteus.phoneavbridge.session.SessionState
@@ -38,6 +42,7 @@ class MainActivity : AppCompatActivity() {
   private lateinit var hostText: TextView
   private lateinit var issuesText: TextView
   private lateinit var pairButton: Button
+  private lateinit var scanQrButton: Button
   private lateinit var cameraSwitch: MaterialSwitch
   private lateinit var micSwitch: MaterialSwitch
   private lateinit var speakerSwitch: MaterialSwitch
@@ -57,6 +62,7 @@ class MainActivity : AppCompatActivity() {
   @Volatile private var lastHostStatus: HostApiClient.HostStatusSnapshot? = null
   @Volatile private var lastHostStatusError: String? = null
   @Volatile private var discoveredHostPreview: DiscoveredHost? = null
+  @Volatile private var discoveredHostCandidates: List<DiscoveredHost> = emptyList()
   @Volatile private var publishGeneration = 0
   private val localDeviceName by lazy { DeviceIdentityResolver.resolveDeviceName(this) }
   private val localDeviceId by lazy { DeviceIdentityResolver.resolveDeviceId(this) }
@@ -73,6 +79,17 @@ class MainActivity : AppCompatActivity() {
       pendingPermissionToggle = null
     }
 
+  private val qrScanLauncher =
+    registerForActivityResult(ScanContract()) { result ->
+      val contents = result.contents?.trim().orEmpty()
+      if (contents.isBlank()) {
+        Log.i(logTag, "QR scan result empty/cancelled")
+        return@registerForActivityResult
+      }
+      Log.i(logTag, "QR scan captured payloadLength=${contents.length}")
+      beginQrPairingFlow(contents)
+    }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     setContentView(R.layout.activity_main)
@@ -82,6 +99,7 @@ class MainActivity : AppCompatActivity() {
     hostText = findViewById(R.id.hostText)
     issuesText = findViewById(R.id.issuesText)
     pairButton = findViewById(R.id.pairButton)
+    scanQrButton = findViewById(R.id.scanQrButton)
     cameraSwitch = findViewById(R.id.cameraSwitch)
     micSwitch = findViewById(R.id.micSwitch)
     speakerSwitch = findViewById(R.id.speakerSwitch)
@@ -115,8 +133,17 @@ class MainActivity : AppCompatActivity() {
       if (AppPrefs.isPaired(this)) {
         unpairHost()
       } else {
-        pairHost()
+        beginPairSelectionFlow()
       }
+    }
+
+    scanQrButton.setOnClickListener {
+      if (pairingInProgress) return@setOnClickListener
+      if (AppPrefs.isPaired(this)) {
+        Toast.makeText(this, getString(R.string.scan_qr_requires_unpair), Toast.LENGTH_SHORT).show()
+        return@setOnClickListener
+      }
+      launchQrScan()
     }
 
     cameraSwitch.setOnCheckedChangeListener { _, enabled ->
@@ -201,7 +228,118 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
-  private fun pairHost() {
+  private fun launchQrScan() {
+    if (!hasPermission(Manifest.permission.CAMERA)) {
+      pendingPermissionToggle = { launchQrScan() }
+      permissionLauncher.launch(arrayOf(Manifest.permission.CAMERA))
+      return
+    }
+    val options = ScanOptions()
+      .setDesiredBarcodeFormats(ScanOptions.QR_CODE)
+      .setPrompt(getString(R.string.scan_qr_prompt))
+      .setBeepEnabled(true)
+      .setBarcodeImageEnabled(false)
+      .setOrientationLocked(false)
+    qrScanLauncher.launch(options)
+  }
+
+  private fun beginQrPairingFlow(rawPayload: String) {
+    val payload = QrPairPayloadParser.parse(rawPayload)
+    if (payload == null) {
+      val preview = rawPayload.take(120).replace("\n", " ")
+      Log.w(logTag, "QR parse failed. payloadPreview=$preview")
+      Toast.makeText(this, getString(R.string.scan_qr_invalid), Toast.LENGTH_LONG).show()
+      return
+    }
+
+    Log.i(logTag, "QR parse success baseUrl=${payload.baseUrl}")
+
+    pairingInProgress = true
+    updateUiFromPrefs()
+
+    ioExecutor.execute {
+      try {
+        val host = hostApiClient.redeemQrToken(payload.baseUrl, payload.token)
+        Log.i(logTag, "QR redeem success baseUrl=${host.baseUrl}")
+        discoveredHostPreview = host
+        discoveredHostCandidates = listOf(host)
+        runOnUiThread {
+          pairingInProgress = false
+          updateUiFromPrefs()
+          pairHost(host)
+        }
+      } catch (error: Exception) {
+        lastHostStatusError = error.message ?: "pair failed"
+        Log.w(logTag, "QR redeem/pair failed: ${error.message}", error)
+        runOnUiThread {
+          pairingInProgress = false
+          updateUiFromPrefs()
+          val resolved = resolvePairFailureMessageRes(error)
+          if (resolved == R.string.pair_failed_unknown) {
+            Toast.makeText(this, getString(R.string.pair_failed, error.message ?: "unknown"), Toast.LENGTH_LONG).show()
+          } else {
+            Toast.makeText(this, getString(resolved), Toast.LENGTH_LONG).show()
+          }
+        }
+      }
+    }
+  }
+
+  private fun beginPairSelectionFlow() {
+    pairingInProgress = true
+    updateUiFromPrefs()
+    pairButton.isEnabled = false
+
+    ioExecutor.execute {
+      try {
+        val hosts = discoverHostsForPair()
+        discoveredHostCandidates = hosts
+        runOnUiThread {
+          pairingInProgress = false
+          updateUiFromPrefs()
+          pairButton.isEnabled = true
+          when {
+            hosts.isEmpty() -> {
+              Toast.makeText(this, getString(R.string.pair_failed_discovery), Toast.LENGTH_LONG).show()
+            }
+            hosts.size == 1 -> {
+              pairHost(hosts[0])
+            }
+            else -> {
+              showHostSelectionDialog(hosts)
+            }
+          }
+        }
+      } catch (error: Exception) {
+        lastHostStatusError = error.message ?: "pair failed"
+        runOnUiThread {
+          pairingInProgress = false
+          updateUiFromPrefs()
+          pairButton.isEnabled = true
+          Toast.makeText(this, getString(resolvePairFailureMessageRes(error)), Toast.LENGTH_LONG).show()
+        }
+      }
+    }
+  }
+
+  private fun showHostSelectionDialog(hosts: List<DiscoveredHost>) {
+    val labels = hosts.map { formatHostLabel(it) }.toTypedArray()
+    AlertDialog.Builder(this)
+      .setTitle(R.string.select_host_title)
+      .setItems(labels) { _, which ->
+        pairHost(hosts[which])
+      }
+      .setNegativeButton(android.R.string.cancel, null)
+      .show()
+  }
+
+  private fun formatHostLabel(host: DiscoveredHost): String {
+    val name = host.displayName?.trim().orEmpty().ifBlank { host.baseUrl }
+    val platform = host.platform?.trim().orEmpty().ifBlank { "host" }
+    return "$name ($platform)\n${host.baseUrl}"
+  }
+
+  private fun pairHost(host: DiscoveredHost) {
     pairingInProgress = true
     updateUiFromPrefs()
     pairButton.isEnabled = false
@@ -209,7 +347,6 @@ class MainActivity : AppCompatActivity() {
     ioExecutor.execute {
       try {
         sessionStateMachine.onPairStart()
-        val host = discoverHostOrThrow()
         discoveredHostPreview = host
         hostApiClient.pair(
           baseUrl = host.baseUrl,
@@ -291,20 +428,20 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
-  private fun discoverHostOrThrow(): DiscoveredHost {
-    hostDiscoveryClient.discover(timeoutMs = 2500)?.let { return it }
-    hostDiscoveryClient.discover(timeoutMs = 4000)?.let { return it }
+  private fun discoverHostsForPair(): List<DiscoveredHost> {
+    hostDiscoveryClient.discoverAll(timeoutMs = 2500).takeIf { it.isNotEmpty() }?.let { return it }
+    hostDiscoveryClient.discoverAll(timeoutMs = 4000).takeIf { it.isNotEmpty() }?.let { return it }
 
     val savedBaseUrl = AppPrefs.getHostBaseUrl(this)
     val savedPairCode = AppPrefs.getHostPairCode(this)
     if (savedBaseUrl.isNotBlank() && !isLoopbackBaseUrl(savedBaseUrl)) {
       try {
-        return hostApiClient.fetchBootstrap(savedBaseUrl)
+        return listOf(hostApiClient.fetchBootstrap(savedBaseUrl))
       } catch (_: Exception) {
       }
     }
     if (savedBaseUrl.isNotBlank() && savedPairCode.isNotBlank() && !isLoopbackBaseUrl(savedBaseUrl)) {
-      return DiscoveredHost(savedBaseUrl, savedPairCode)
+      return listOf(DiscoveredHost(savedBaseUrl, savedPairCode))
     }
 
     val bootstrapCandidates = if (isLikelyEmulator()) {
@@ -317,17 +454,18 @@ class MainActivity : AppCompatActivity() {
     }
     bootstrapCandidates.forEach { candidate ->
       try {
-        return hostApiClient.fetchBootstrap(candidate)
+        return listOf(hostApiClient.fetchBootstrap(candidate))
       } catch (_: Exception) {
       }
     }
-
-    throw IllegalStateException("Host auto-discovery failed. Ensure host app is running on the same network.")
+    return emptyList()
   }
 
   private fun updateUiFromPrefs() {
     val paired = AppPrefs.isPaired(this)
     pairButton.text = if (paired) getString(R.string.unpair_button) else getString(R.string.pair_button)
+    pairButton.isEnabled = !pairingInProgress
+    scanQrButton.isEnabled = !pairingInProgress && !paired
     if (!paired && sessionStateMachine.state != SessionState.DISCONNECTED) {
       sessionStateMachine.onUnpair()
     }
@@ -635,9 +773,8 @@ class MainActivity : AppCompatActivity() {
     }
     val preview = discoverHostPreview()
     discoveredHostPreview = preview
+    discoveredHostCandidates = preview?.let { listOf(it) } ?: emptyList()
     if (preview != null) {
-      AppPrefs.setHostBaseUrl(this, preview.baseUrl)
-      AppPrefs.setHostPairCode(this, preview.pairingCode)
       try {
         hostApiClient.publishPresence(
           baseUrl = preview.baseUrl,
@@ -652,7 +789,7 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun discoverHostPreview(): DiscoveredHost? {
-    hostDiscoveryClient.discover(timeoutMs = 1200)?.let { return it }
+    hostDiscoveryClient.discoverAll(timeoutMs = 1200).firstOrNull()?.let { return it }
 
     val savedBaseUrl = AppPrefs.getHostBaseUrl(this)
     val savedPairCode = AppPrefs.getHostPairCode(this)
@@ -699,6 +836,7 @@ class MainActivity : AppCompatActivity() {
     return when {
       message.contains("auto-discovery failed") || message.contains("discover") -> R.string.pair_failed_discovery
       message.contains("refused") || message.contains("timed out") || message.contains("unreachable") -> R.string.pair_failed_unreachable
+      message.contains("qr token") || message.contains("request failed (404)") -> R.string.pair_failed_qr_token
       message.contains("invalid pair code") || message.contains("request failed (400)") -> R.string.pair_failed_rejected
       else -> R.string.pair_failed_unknown
     }

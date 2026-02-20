@@ -32,6 +32,20 @@
       </section>
 
       <section class="card">
+        <h2>QR Pairing</h2>
+        <p class="section-note">Phone can scan this QR directly. It auto-refreshes before expiry.</p>
+        <div class="row">
+          <button id="qrTokenBtn">Regenerate QR Code</button>
+          <button id="copyQrPayloadBtn" type="button">Copy Payload</button>
+        </div>
+        <div id="qrMetaText" class="qr-meta">Preparing QR code…</div>
+        <div class="qr-preview">
+          <img id="qrImage" alt="Pairing QR code" />
+        </div>
+        <pre id="qrTokenOut">QR payload will appear here.</pre>
+      </section>
+
+      <section class="card">
         <h2>Resources (Read-only)</h2>
         <p class="section-note">Controls are owned by the Android phone app.</p>
         <div class="resource-list">

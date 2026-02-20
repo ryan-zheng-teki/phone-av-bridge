@@ -44,6 +44,7 @@ body {
   display: flex;
   gap: 8px;
   margin-top: 8px;
+  flex-wrap: wrap;
 }
 
 input[type="text"] {
@@ -115,4 +116,26 @@ pre {
   background: #eef5fc;
   border-radius: 8px;
   padding: 10px;
+}
+
+.qr-preview {
+  margin-top: 10px;
+  display: flex;
+  justify-content: center;
+}
+
+.qr-meta {
+  margin-top: 8px;
+  font-size: 13px;
+  color: #4f647b;
+}
+
+#qrImage {
+  display: none;
+  width: 360px;
+  max-width: 100%;
+  border: 1px solid #d1deec;
+  border-radius: 8px;
+  background: #fff;
+  padding: 8px;
 }
