@@ -132,29 +132,36 @@ open "$HOME/Applications/PhoneAVBridgeCamera.app"
 
 - Reason: `open -a PhoneAVBridgeCamera` prefers `/Applications/PhoneAVBridgeCamera.app` if multiple copies exist (`/Applications` and `~/Applications`), which can start an older bundle.
 
-## Current Linux User Flow (Preview)
+## Current Linux User Flow (Release .deb)
 
-1. Install host app with `desktop-av-bridge-host/installers/linux/install.sh`.
-2. Launch `Phone AV Bridge Host` from app menu (or `~/.local/bin/phone-av-bridge-host-start`).
-3. Install Android APK and open `Phone AV Bridge`.
-4. In Android app, either:
-   - tap `Pair Host` to discover hosts on LAN (single host quick-pair, multi-host explicit selection), or
-   - tap `Scan QR Pairing` to pair explicitly with a host-generated QR token.
-5. Enable `Camera`, `Microphone`, and/or `Speaker`.
-6. In Zoom/meeting app on Linux:
-   - in compatibility mode, select camera device `AutoByteusPhoneCamera`,
-   - select the virtual mic source matching `PhoneAVBridgeMicInput-<phone>-<id>` (fallback may appear as `Monitor of PhoneAVBridgeMic-<phone>-<id>`),
-   - for phone speaker playback, host now avoids bridge mic sources by default; if needed, set `LINUX_SPEAKER_CAPTURE_SOURCE` to force a specific source.
+1. Download `phone-av-bridge-host_<version>_amd64.deb` from GitHub Releases.
+2. Install with:
+
+```bash
+sudo apt install -y ./phone-av-bridge-host_<version>_amd64.deb
+```
+
+3. Start host:
+
+```bash
+phone-av-bridge-host-start
+```
+
+4. Verify host is up:
+
+```bash
+curl -s http://127.0.0.1:8787/health
+```
+
+5. Install Android APK, pair, and enable `Camera` / `Microphone` / `Speaker`.
+6. In Zoom/Meet on Linux:
+   - Camera: `AutoByteusPhoneCamera`
+   - Microphone: `PhoneAVBridgeMicInput-<phone>-<id>`
 
 Notes:
-- Camera/mic media is sent from Android via in-app RTSP server.
-- Android publishes RTSP endpoint as LAN IPv4 (`rtsp://<phone-lan-ip>:1935/`) for host reachability.
-- Debian package install (`dpkg -i`) auto-configures persistent `v4l2loopback` loading for compatibility mode.
-- Debian package also creates persistent host config at `/etc/default/phone-av-bridge-host`; use `sudo phone-av-bridge-host-set-speaker-source <source|auto>` instead of temporary `export`.
-- Linux camera mode controls:
-  - `LINUX_CAMERA_MODE=compatibility`
-  - `LINUX_CAMERA_MODE=userspace`
-  - `LINUX_CAMERA_MODE=auto`
+- Debian package commands are installed under `/usr/bin` (not `~/.local/bin`).
+- Prefer `apt install ./...deb` over `dpkg -i ...deb` so apt can resolve system dependencies.
+- Local developer installer (`desktop-av-bridge-host/installers/linux/install.sh`) is still available, but release users should use the `.deb`.
 
 ## Current macOS User Flow (Preview)
 
@@ -200,8 +207,8 @@ This repository includes a release workflow at:
 Trigger a release by pushing a tag:
 
 ```bash
-git tag v0.1.2
-git push origin v0.1.2
+git tag v0.1.8
+git push origin v0.1.8
 ```
 
 Published release assets:
@@ -260,11 +267,11 @@ If camera app keeps reopening after you close it, stop host first:
 1. Download these release assets:
    - `phone-av-bridge-host_<version>_amd64.deb`
    - `PhoneAVBridge-<version>-android-*.apk`
-2. Install host package:
+2. Install host package (important: use `apt`, not `dpkg -i`):
 
 ```bash
 VERSION="<release-version>"
-sudo apt install -y "$HOME/Downloads/phone-av-bridge-host_${VERSION}_amd64.deb"
+sudo apt install -y "./phone-av-bridge-host_${VERSION}_amd64.deb"
 ```
 
 3. Start host:
@@ -273,43 +280,33 @@ sudo apt install -y "$HOME/Downloads/phone-av-bridge-host_${VERSION}_amd64.deb"
 phone-av-bridge-host-start
 ```
 
-4. Install Android APK on phone and pair to host.
-5. In Zoom/Meet on Linux:
+4. Verify host:
+
+```bash
+curl -s http://127.0.0.1:8787/health
+```
+
+5. Install Android APK on phone and pair to host.
+6. In Zoom/Meet on Linux:
    - Camera: `AutoByteusPhoneCamera` (compatibility mode).
    - Microphone: `PhoneAVBridgeMicInput-<phone>-<id>` (fallback name may appear as `Monitor of PhoneAVBridgeMic-...`).
    - Speaker routing to phone is controlled from Android app `Enable Speaker`.
 
-Linux troubleshooting quick checks:
+Linux quick checks (only if something fails):
 
 ```bash
-# Host process + live status
-ps -ef | rg 'desktop-app/server.mjs' | rg -v rg
-curl -s http://127.0.0.1:8787/api/status | jq '{resources:.status.resources,routeHints:.status.routeHints,issues:.status.issues}'
-
-# Virtual microphone sources
-pactl list short sources | rg 'phone_av_bridge_mic'
-
 # Host logs
 tail -n 120 ~/.local/state/phone-av-bridge-host/phone-av-bridge-host.log
-```
 
-If microphone does not appear in Zoom/Discord:
-- Fully quit and reopen the app (device list is often cached).
-- Confirm `PhoneAVBridgeMicInput-*` exists in `pactl list short sources`.
-
-If voice sounds doubled:
-- Restart host once to clear stale media workers:
-
-```bash
+# Restart host once
 phone-av-bridge-host-stop
 phone-av-bridge-host-start
 ```
 
-If you need to pin speaker capture source persistently (advanced):
+If you need fixed speaker capture source (advanced):
 
 ```bash
 sudo phone-av-bridge-host-set-speaker-source <source-name>
-# Return to automatic safe selection:
 sudo phone-av-bridge-host-set-speaker-source auto
 ```
 

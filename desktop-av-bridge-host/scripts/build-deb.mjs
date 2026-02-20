@@ -46,6 +46,7 @@ async function buildDeb() {
 
   const hostArtifacts = [
     'package.json',
+    'package-lock.json',
     'README.md',
     'core',
     'adapters',
@@ -61,6 +62,10 @@ async function buildDeb() {
   const bridgeRuntimeSource = path.join(repoRoot, 'phone-av-camera-bridge-runtime');
   const bridgeRuntimeTarget = path.join(appRoot, 'phone-av-camera-bridge-runtime');
   await fs.cp(bridgeRuntimeSource, bridgeRuntimeTarget, { recursive: true });
+
+  await execFileAsync('npm', ['ci', '--omit=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
+    cwd: appRoot,
+  });
 
   const control = [
     'Package: phone-av-bridge-host',
@@ -117,6 +122,21 @@ RUNTIME_NODE="\${APP_ROOT}/runtime/node/bin/node"
 
 mkdir -p "\${LOG_DIR}"
 
+assert_packaged_node_dependencies() {
+  local missing=()
+  local module_name
+  for module_name in qrcode ws; do
+    if [[ ! -f "\${APP_ROOT}/node_modules/\${module_name}/package.json" ]]; then
+      missing+=("\${module_name}")
+    fi
+  done
+  if (( \${#missing[@]} > 0 )); then
+    echo "Phone AV Bridge Host package is incomplete: missing Node dependencies (\${missing[*]})." >&2
+    echo "Reinstall a fixed .deb package, or run: sudo npm --prefix \${APP_ROOT} install --omit=dev" >&2
+    exit 1
+  fi
+}
+
 if [[ -x "\${RUNTIME_NODE}" ]] && "\${RUNTIME_NODE}" --version >/dev/null 2>&1; then
   NODE_BIN="\${RUNTIME_NODE}"
 elif command -v node >/dev/null 2>&1; then
@@ -128,6 +148,7 @@ fi
 
 export LINUX_CAMERA_MODE="\${LINUX_CAMERA_MODE:-compatibility}"
 export V4L2_DEVICE="\${V4L2_DEVICE:-/dev/video2}"
+assert_packaged_node_dependencies
 
 if [[ -f "\${PID_FILE}" ]] && kill -0 "$(cat "\${PID_FILE}")" >/dev/null 2>&1; then
   if command -v xdg-open >/dev/null 2>&1; then

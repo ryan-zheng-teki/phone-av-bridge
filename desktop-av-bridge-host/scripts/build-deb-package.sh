@@ -15,6 +15,7 @@ require_cmd() {
 }
 
 require_cmd node
+require_cmd npm
 require_cmd dpkg-deb
 require_cmd dpkg
 
@@ -51,7 +52,7 @@ echo "Preparing bundled Node runtime..."
 node "${PROJECT_ROOT}/scripts/prepare-runtime.mjs"
 
 echo "Staging package payload..."
-for item in package.json README.md core adapters desktop-app installers scripts runtime; do
+for item in package.json package-lock.json README.md core adapters desktop-app installers scripts runtime; do
   cp -a "${PROJECT_ROOT}/${item}" "${PAYLOAD_ROOT}/"
 done
 
@@ -60,6 +61,13 @@ if [[ -d "${BRIDGE_RUNTIME_SOURCE}" ]]; then
 else
   echo "Missing bridge runtime directory: ${BRIDGE_RUNTIME_SOURCE}" >&2
   exit 1
+fi
+
+echo "Installing production Node dependencies into package payload..."
+if [[ -f "${PAYLOAD_ROOT}/package-lock.json" ]]; then
+  npm ci --prefix "${PAYLOAD_ROOT}" --omit=dev --ignore-scripts --no-audit --no-fund
+else
+  npm install --prefix "${PAYLOAD_ROOT}" --omit=dev --ignore-scripts --no-audit --no-fund
 fi
 
 cat > "${USR_BIN_DIR}/phone-av-bridge-host-start" <<'LAUNCHER'
@@ -88,6 +96,21 @@ load_env_file() {
 
 load_env_file "${SYSTEM_ENV_FILE}"
 load_env_file "${USER_ENV_FILE}"
+
+assert_packaged_node_dependencies() {
+  local missing=()
+  local module_name
+  for module_name in qrcode ws; do
+    if [[ ! -f "${TARGET_DIR}/node_modules/${module_name}/package.json" ]]; then
+      missing+=("${module_name}")
+    fi
+  done
+  if (( ${#missing[@]} > 0 )); then
+    echo "Phone AV Bridge Host package is incomplete: missing Node dependencies (${missing[*]})." >&2
+    echo "Reinstall a fixed .deb package, or run: sudo npm --prefix ${TARGET_DIR} install --omit=dev" >&2
+    exit 1
+  fi
+}
 
 kill_tree() {
   local pid="$1"
@@ -127,6 +150,7 @@ fi
 
 export LINUX_CAMERA_MODE="${LINUX_CAMERA_MODE:-compatibility}"
 export V4L2_DEVICE="${V4L2_DEVICE:-/dev/video2}"
+assert_packaged_node_dependencies
 
 if [[ -f "${PID_FILE}" ]] && kill -0 "$(cat "${PID_FILE}")" >/dev/null 2>&1; then
   if command -v xdg-open >/dev/null 2>&1; then

@@ -20,9 +20,24 @@ npm run start:mock
 
 Then open `http://127.0.0.1:8787`.
 
+## Linux quick install (release .deb)
+
+```bash
+VERSION="<release-version>"
+sudo apt install -y "./phone-av-bridge-host_${VERSION}_amd64.deb"
+phone-av-bridge-host-start
+curl -s http://127.0.0.1:8787/health
+```
+
+If startup fails:
+
+```bash
+tail -n 120 ~/.local/state/phone-av-bridge-host/phone-av-bridge-host.log
+```
+
 ## End-user install behavior
 
-- Linux installer creates:
+- Linux local installer (`installers/linux/install.sh`) creates:
   - app launcher: `Phone AV Bridge Host`
   - start command: `~/.local/bin/phone-av-bridge-host-start`
   - stop command: `~/.local/bin/phone-av-bridge-host-stop`
@@ -30,6 +45,11 @@ Then open `http://127.0.0.1:8787`.
   - camera mode defaults:
     - `LINUX_CAMERA_MODE=compatibility` when compatibility camera deps are installed
     - `LINUX_CAMERA_MODE=userspace` when installed with `INSTALL_COMPAT_CAMERA=0`
+- Linux Debian package (`.deb`) installs:
+  - start command: `/usr/bin/phone-av-bridge-host-start`
+  - stop command: `/usr/bin/phone-av-bridge-host-stop`
+  - desktop launcher: `/usr/share/applications/phone-av-bridge-host.desktop`
+  - host payload: `/opt/phone-av-bridge-host`
 - macOS installer creates:
   - app bundle: `~/Applications/Phone AV Bridge Host.app`
   - start command: `~/Applications/PhoneAVBridgeHost/start.command`
