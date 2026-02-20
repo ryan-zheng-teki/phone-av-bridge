@@ -5,21 +5,21 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
-import QRCode from 'qrcode';
 import { SessionController } from '../core/session-controller.mjs';
-import { runPreflight } from '../core/preflight-service.mjs';
 import { LinuxCameraBridgeRunner, MockCameraAdapter } from '../adapters/linux-camera/bridge-runner.mjs';
 import { LinuxAudioRunner, MockAudioAdapter } from '../adapters/linux-audio/audio-runner.mjs';
 import { MacOsCameraExtensionRunner, MockMacCameraAdapter } from '../adapters/macos-firstparty-camera/cameraextension-runner.mjs';
 import { MacOsFirstPartyAudioRunner, MockMacAudioAdapter } from '../adapters/macos-firstparty-audio/audio-runner.mjs';
+import { buildHttpHandler } from './http-router.mjs';
+import { createBootstrapRoutes } from './routes/bootstrap-routes.mjs';
+import { createSessionRoutes } from './routes/session-routes.mjs';
+import { createQrTokenService, DEFAULT_QR_TOKEN_TTL_MS } from './services/qr-token-service.mjs';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const staticRoot = path.join(__dirname, 'static');
 const DISCOVERY_MAGIC = 'PHONE_AV_BRIDGE_DISCOVER_V1';
 const DEFAULT_STATE_FILE = path.join(os.homedir(), '.phone-av-bridge-host', 'state.json');
-const DEFAULT_QR_TOKEN_TTL_MS = 2 * 60 * 1000;
-const DEFAULT_QR_IMAGE_SIZE = 360;
 
 function resolveAdvertisedHost(bindHost) {
   if (bindHost !== '0.0.0.0') {
@@ -234,7 +234,6 @@ export function createApp({
 } = {}) {
   const controller = createController({ useMockAdapters });
   let preflightReport = null;
-  const qrTokenRegistry = new Map();
   const hostForClients = (advertisedHost || '').trim() || resolveAdvertisedHost(host);
   const bootstrap = {
     service: 'phone-av-bridge',
@@ -246,174 +245,32 @@ export function createApp({
     pairingCode,
     baseUrl: `http://${hostForClients}:${port}`,
   };
-
-  function cleanupQrTokens(now = Date.now()) {
-    for (const [token, entry] of qrTokenRegistry.entries()) {
-      if (!entry || Number.isNaN(entry.expiresAt) || entry.expiresAt <= now) {
-        qrTokenRegistry.delete(token);
-      }
-    }
-  }
-
-  async function issueQrToken() {
-    const now = Date.now();
-    cleanupQrTokens(now);
-    const token = crypto.randomBytes(24).toString('base64url');
-    const expiresAt = now + Math.max(1000, Number(qrTokenTtlMs) || DEFAULT_QR_TOKEN_TTL_MS);
-    qrTokenRegistry.set(token, { expiresAt, used: false });
-    const payload = {
-      service: 'phone-av-bridge',
-      version: 1,
-      token,
-      baseUrl: bootstrap.baseUrl,
-      hostId: bootstrap.hostId,
-      displayName: bootstrap.displayName,
-    };
-    const payloadText = JSON.stringify(payload);
-    let qrImageDataUrl = null;
-    try {
-      qrImageDataUrl = await QRCode.toDataURL(payloadText, {
-        errorCorrectionLevel: 'M',
-        margin: 1,
-        width: DEFAULT_QR_IMAGE_SIZE,
-      });
-    } catch {
-      qrImageDataUrl = null;
-    }
-
-    return {
-      token,
-      expiresAt: new Date(expiresAt).toISOString(),
-      payload,
-      payloadText,
-      qrImageDataUrl,
-    };
-  }
-
-  function redeemQrToken(token) {
-    const normalized = typeof token === 'string' ? token.trim() : '';
-    if (!normalized) {
-      throw new Error('QR token is required.');
-    }
-    const now = Date.now();
-    cleanupQrTokens(now);
-    const entry = qrTokenRegistry.get(normalized);
-    if (!entry) {
-      throw new Error('QR token is invalid or expired.');
-    }
-    if (entry.used) {
-      throw new Error('QR token has already been used.');
-    }
-    if (entry.expiresAt <= now) {
-      qrTokenRegistry.delete(normalized);
-      throw new Error('QR token is invalid or expired.');
-    }
-    entry.used = true;
-    qrTokenRegistry.set(normalized, entry);
-    return {
+  const qrTokenService = createQrTokenService({ bootstrap, qrTokenTtlMs });
+  const routeHandlers = [
+    createBootstrapRoutes({
+      controller,
       bootstrap,
-    };
-  }
+      qrTokenService,
+      getPreflightReport: () => preflightReport,
+      setPreflightReport: (nextReport) => {
+        preflightReport = nextReport;
+      },
+      readBody,
+      jsonResponse,
+    }),
+    createSessionRoutes({
+      controller,
+      pairingCode,
+      readBody,
+      jsonResponse,
+    }),
+  ];
 
-  const server = http.createServer(async (req, res) => {
-    try {
-      if (req.method === 'GET' && req.url === '/health') {
-        return jsonResponse(res, 200, { ok: true, service: 'phone-av-bridge-host' });
-      }
-
-      if (req.method === 'GET' && req.url === '/api/status') {
-        return jsonResponse(res, 200, {
-          status: controller.getStatus(),
-          preflight: preflightReport,
-          bootstrap,
-        });
-      }
-
-      if (req.method === 'GET' && req.url === '/api/speaker/stream') {
-        controller.attachSpeakerStream(res);
-        return;
-      }
-
-      if (req.method === 'GET' && req.url === '/api/bootstrap') {
-        return jsonResponse(res, 200, { bootstrap });
-      }
-
-      if (req.method === 'POST' && req.url === '/api/bootstrap/qr-token') {
-        const qrToken = await issueQrToken();
-        console.log(`[qr] issued token exp=${qrToken.expiresAt} host=${bootstrap.baseUrl} remote=${req.socket.remoteAddress || 'unknown'}`);
-        return jsonResponse(res, 200, { qrToken });
-      }
-
-      if (req.method === 'POST' && req.url === '/api/bootstrap/qr-redeem') {
-        const body = await readBody(req);
-        const tokenPreview = typeof body.token === 'string' ? `${body.token.slice(0, 6)}…` : 'none';
-        let redeemed;
-        try {
-          redeemed = redeemQrToken(body.token);
-        } catch (error) {
-          console.warn(`[qr] redeem failed token=${tokenPreview} remote=${req.socket.remoteAddress || 'unknown'} error=${error.message}`);
-          throw error;
-        }
-        console.log(`[qr] redeem success token=${tokenPreview} remote=${req.socket.remoteAddress || 'unknown'} baseUrl=${redeemed.bootstrap.baseUrl}`);
-        return jsonResponse(res, 200, redeemed);
-      }
-
-      if (req.method === 'POST' && req.url === '/api/preflight') {
-        preflightReport = await runPreflight(process.platform);
-        return jsonResponse(res, 200, { preflight: preflightReport });
-      }
-
-      if (req.method === 'POST' && req.url === '/api/pair') {
-        const body = await readBody(req);
-        if ((body.pairCode || '') !== pairingCode) {
-          throw new Error('Invalid pair code.');
-        }
-        const status = await controller.pairHost(body.pairCode || '', {
-          deviceName: typeof body.deviceName === 'string' ? body.deviceName.trim() : undefined,
-          deviceId: typeof body.deviceId === 'string' ? body.deviceId.trim() : undefined,
-        });
-        return jsonResponse(res, 200, { status });
-      }
-
-      if (req.method === 'POST' && req.url === '/api/presence') {
-        const body = await readBody(req);
-        const status = controller.notePhonePresence({
-          deviceName: typeof body.deviceName === 'string' ? body.deviceName.trim() : undefined,
-          deviceId: typeof body.deviceId === 'string' ? body.deviceId.trim() : undefined,
-        });
-        return jsonResponse(res, 200, { status });
-      }
-
-      if (req.method === 'POST' && req.url === '/api/unpair') {
-        const status = await controller.unpairHost();
-        return jsonResponse(res, 200, { status });
-      }
-
-      if (req.method === 'POST' && req.url === '/api/toggles') {
-        const body = await readBody(req);
-        const status = await controller.applyResourceState({
-          camera: !!body.camera,
-          microphone: !!body.microphone,
-          speaker: !!body.speaker,
-          cameraLens: typeof body.cameraLens === 'string' ? body.cameraLens.trim() : undefined,
-          cameraOrientationMode: typeof body.cameraOrientationMode === 'string' ? body.cameraOrientationMode.trim() : undefined,
-          cameraStreamUrl: typeof body.cameraStreamUrl === 'string' ? body.cameraStreamUrl.trim() : undefined,
-          deviceName: typeof body.deviceName === 'string' ? body.deviceName.trim() : undefined,
-          deviceId: typeof body.deviceId === 'string' ? body.deviceId.trim() : undefined,
-        });
-        return jsonResponse(res, 200, { status });
-      }
-
-      if (req.method === 'GET') {
-        return serveStatic(req, res);
-      }
-
-      return jsonResponse(res, 404, { error: 'Not found' });
-    } catch (error) {
-      console.warn(`[http] ${req.method} ${req.url} failed: ${error.message || 'Request failed'}`);
-      return jsonResponse(res, 400, { error: error.message || 'Request failed' });
-    }
-  });
+  const server = http.createServer(buildHttpHandler({
+    routeHandlers,
+    serveStatic,
+    jsonResponse,
+  }));
 
   return { server, controller, bootstrap };
 }

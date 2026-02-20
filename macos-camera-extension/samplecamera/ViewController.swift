@@ -61,14 +61,12 @@ class ViewController: NSViewController {
     private var timer: Timer?
     private var propTimer: Timer?
     private var hostBridgeTimer: Timer?
-    private var qrExpiryTimer: Timer?
-    private var qrAutoRefreshTimer: Timer?
     private var hostBridgeIsRunning = false
     private var hostBridgeAutoStartAttempted = false
-    private var latestHostResourceStatus: HostResourceStatus?
+    private var latestHostResourceStatus: HostBridgeClient.HostStatusSnapshot?
     private var latestQrPayloadText: String?
-    private var latestQrExpiryDate: Date?
-    private var qrTokenRequestInFlight = false
+    private lazy var hostBridgeClient = HostBridgeClient(baseURL: hostBridgeBaseURL)
+    private var qrTokenCoordinator: QrTokenCoordinator?
     private var didSetInitialStatus = false
 
     func activateCamera() {
@@ -81,22 +79,7 @@ class ViewController: NSViewController {
         OSSystemExtensionManager.shared.submitRequest(activationRequest)
     }
 
-    private struct HostResourceStatus {
-        var paired: Bool
-        var hostStatus: String
-        var phoneName: String?
-        var phoneId: String?
-        var camera: Bool
-        var microphone: Bool
-        var speaker: Bool
-        var cameraLens: String
-        var cameraOrientationMode: String
-        var cameraAvailable: Bool
-        var microphoneAvailable: Bool
-        var speakerAvailable: Bool
-        var cameraStreamUrl: String?
-        var issues: [String]
-    }
+    private typealias HostResourceStatus = HostBridgeClient.HostStatusSnapshot
     
     func deactivateCamera() {
         guard let extensionIdentifier = ViewController._extensionBundle().bundleIdentifier else {
@@ -385,6 +368,7 @@ class ViewController: NSViewController {
     override func viewDidLoad() {
         super.viewDidLoad()
         configureInterface()
+        configureQrCoordinator()
         registerForDeviceNotifications()
         refreshHostBridgeStatus(autoStartIfNeeded: true)
         hostBridgeTimer?.invalidate()
@@ -604,8 +588,7 @@ class ViewController: NSViewController {
         timer?.invalidate()
         propTimer?.invalidate()
         hostBridgeTimer?.invalidate()
-        qrExpiryTimer?.invalidate()
-        qrAutoRefreshTimer?.invalidate()
+        qrTokenCoordinator?.stop(reason: "view-controller-deinit")
     }
 
 
@@ -618,20 +601,32 @@ private extension ViewController {
         return formatter
     }()
 
-    static let qrISO8601Formatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return formatter
-    }()
-
-    static let qrISO8601FallbackFormatter: ISO8601DateFormatter = {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime]
-        return formatter
-    }()
-
     var hostBridgeBaseURL: URL {
         URL(string: "http://127.0.0.1:8787")!
+    }
+
+    func configureQrCoordinator() {
+        let coordinator = QrTokenCoordinator(
+            hostBridgeClient: hostBridgeClient,
+            isHostOnline: { [weak self] in self?.hostBridgeIsRunning == true }
+        )
+        coordinator.onSnapshot = { [weak self] snapshot, manual in
+            self?.applyQrToken(snapshot, manual: manual)
+        }
+        coordinator.onExpiryTick = { [weak self] text in
+            self?.qrExpiryLabel.stringValue = text
+        }
+        coordinator.onError = { [weak self] message in
+            guard let self else { return }
+            self.qrStatusLabel.stringValue = message
+            self.qrExpiryLabel.stringValue = "Check host bridge logs and retry."
+            self.qrRegenerateButton.isEnabled = self.hostBridgeIsRunning
+            self.showMessage(message)
+        }
+        coordinator.onLog = { [weak self] line in
+            self?.showMessage(line)
+        }
+        qrTokenCoordinator = coordinator
     }
 
     @objc func hostBridgeHeartbeat() {
@@ -660,17 +655,7 @@ private extension ViewController {
     }
 
     func checkHostBridgeHealth(completion: @escaping (Bool) -> Void) {
-        var request = URLRequest(url: hostBridgeBaseURL.appendingPathComponent("health"))
-        request.timeoutInterval = 1.2
-        URLSession.shared.dataTask(with: request) { _, response, error in
-            guard error == nil,
-                  let http = response as? HTTPURLResponse,
-                  (200...299).contains(http.statusCode) else {
-                completion(false)
-                return
-            }
-            completion(true)
-        }.resume()
+        hostBridgeClient.health(completion: completion)
     }
 
     func refreshHostBridgeStatus(autoStartIfNeeded: Bool) {
@@ -686,7 +671,9 @@ private extension ViewController {
                     self.hostBridgeStartButton.title = "Restart Host Bridge"
                     self.refreshHostResourceStatus()
                     if transitioned || self.latestQrPayloadText == nil {
-                        self.requestQrToken(manual: false)
+                        self.qrStatusLabel.stringValue = "Generating QR token…"
+                        self.qrRegenerateButton.isEnabled = false
+                        self.qrTokenCoordinator?.refresh(manual: false)
                     }
                     if transitioned {
                         self.showMessage("host bridge online at \(self.hostBridgeBaseURL.absoluteString)")
@@ -695,6 +682,7 @@ private extension ViewController {
                     self.updateHostBridgeBadge("Offline", color: .systemOrange)
                     self.hostBridgeDetailLabel.stringValue = "Host bridge is not running. Android cannot pair/discover until started."
                     self.hostBridgeStartButton.title = "Start Host Bridge"
+                    self.qrTokenCoordinator?.stop(reason: "host-offline")
                     self.resetQrSection(bridgeOnline: false)
                     self.resetHostResourceSection(bridgeOnline: false)
                     if transitioned {
@@ -757,23 +745,6 @@ private extension ViewController {
         }
     }
 
-    private func clearQrTimers() {
-        qrExpiryTimer?.invalidate()
-        qrExpiryTimer = nil
-        qrAutoRefreshTimer?.invalidate()
-        qrAutoRefreshTimer = nil
-    }
-
-    private func parseQrExpiryDate(_ rawValue: String?) -> Date? {
-        guard let raw = rawValue?.trimmingCharacters(in: .whitespacesAndNewlines), !raw.isEmpty else {
-            return nil
-        }
-        if let parsed = Self.qrISO8601Formatter.date(from: raw) {
-            return parsed
-        }
-        return Self.qrISO8601FallbackFormatter.date(from: raw)
-    }
-
     private func imageFromQrDataUrl(_ dataUrl: String?) -> NSImage? {
         guard let dataUrl = dataUrl, let commaIndex = dataUrl.firstIndex(of: ",") else {
             return nil
@@ -805,49 +776,10 @@ private extension ViewController {
         return image
     }
 
-    private func formatQrRemaining(_ interval: TimeInterval) -> String {
-        let total = max(0, Int(interval.rounded(.up)))
-        let minutes = total / 60
-        let seconds = total % 60
-        return "\(minutes)m \(seconds)s"
-    }
+    private func applyQrToken(_ qrToken: HostBridgeClient.QrTokenSnapshot, manual: Bool) {
+        latestQrPayloadText = qrToken.payloadText?.isEmpty == false ? qrToken.payloadText : nil
 
-    @objc private func refreshQrExpiryLabelTick() {
-        guard let expiryDate = latestQrExpiryDate else {
-            qrExpiryLabel.stringValue = "Expiry: unknown"
-            return
-        }
-
-        let remaining = expiryDate.timeIntervalSinceNow
-        if remaining <= 0 {
-            qrExpiryLabel.stringValue = "Expiry: expired (refreshing)"
-            if hostBridgeIsRunning, !qrTokenRequestInFlight {
-                requestQrToken(manual: false)
-            }
-            return
-        }
-        qrExpiryLabel.stringValue = "Expiry: in \(formatQrRemaining(remaining))"
-    }
-
-    private func scheduleQrAutoRefresh() {
-        qrAutoRefreshTimer?.invalidate()
-        guard let expiryDate = latestQrExpiryDate else { return }
-        let refreshInterval = max(1.0, expiryDate.timeIntervalSinceNow - 5.0)
-        qrAutoRefreshTimer = Timer.scheduledTimer(
-            timeInterval: refreshInterval,
-            target: self,
-            selector: #selector(autoRefreshQrToken),
-            userInfo: nil,
-            repeats: false
-        )
-    }
-
-    private func applyQrToken(_ qrToken: [String: Any], manual: Bool) {
-        let payloadText = (qrToken["payloadText"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
-        latestQrPayloadText = (payloadText?.isEmpty == false) ? payloadText : nil
-        latestQrExpiryDate = parseQrExpiryDate(qrToken["expiresAt"] as? String)
-
-        if let image = imageFromQrDataUrl(qrToken["qrImageDataUrl"] as? String) {
+        if let image = imageFromQrDataUrl(qrToken.qrImageDataUrl) {
             qrImageView.image = image
         } else if let image = imageFromQrPayloadText(latestQrPayloadText) {
             qrImageView.image = image
@@ -860,79 +792,16 @@ private extension ViewController {
             : "Scan in Android: Pair via QR."
         qrCopyPayloadButton.isEnabled = latestQrPayloadText != nil
         qrRegenerateButton.isEnabled = true
-        clearQrTimers()
-        refreshQrExpiryLabelTick()
-        qrExpiryTimer = Timer.scheduledTimer(
-            timeInterval: 1.0,
-            target: self,
-            selector: #selector(refreshQrExpiryLabelTick),
-            userInfo: nil,
-            repeats: true
-        )
-        scheduleQrAutoRefresh()
-
-        let token = (qrToken["token"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        let tokenPreview = token.isEmpty ? "n/a" : "\(token.prefix(6))…"
-        let expiryText = (qrToken["expiresAt"] as? String) ?? "unknown"
-        showMessage("qr token ready token=\(tokenPreview) expires=\(expiryText)")
-    }
-
-    private func requestQrToken(manual: Bool) {
-        guard hostBridgeIsRunning else {
-            resetQrSection(bridgeOnline: false)
-            return
-        }
-        if qrTokenRequestInFlight {
-            return
-        }
-        qrTokenRequestInFlight = true
-        qrStatusLabel.stringValue = manual ? "Regenerating QR token…" : "Generating QR token…"
-        qrRegenerateButton.isEnabled = false
-
-        var request = URLRequest(url: hostBridgeBaseURL.appendingPathComponent("api/bootstrap/qr-token"))
-        request.httpMethod = "POST"
-        request.timeoutInterval = 2.0
-        URLSession.shared.dataTask(with: request) { data, response, error in
-            DispatchQueue.main.async {
-                self.qrTokenRequestInFlight = false
-                self.qrRegenerateButton.isEnabled = self.hostBridgeIsRunning
-                if let error = error {
-                    self.qrStatusLabel.stringValue = "Failed to generate QR token."
-                    self.qrExpiryLabel.stringValue = "Check host bridge logs and retry."
-                    self.showMessage("qr token request failed: \(error.localizedDescription)")
-                    return
-                }
-                if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
-                    self.qrStatusLabel.stringValue = "Failed to generate QR token (HTTP \(http.statusCode))."
-                    self.qrExpiryLabel.stringValue = "Check host bridge status and retry."
-                    self.showMessage("qr token request returned HTTP \(http.statusCode)")
-                    return
-                }
-                guard
-                    let data = data,
-                    let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                    let qrToken = root["qrToken"] as? [String: Any]
-                else {
-                    self.qrStatusLabel.stringValue = "QR token response malformed."
-                    self.qrExpiryLabel.stringValue = "Try regenerating QR."
-                    self.showMessage("qr token request returned invalid payload")
-                    return
-                }
-                self.applyQrToken(qrToken, manual: manual)
-            }
-        }.resume()
     }
 
     @objc func regenerateQrToken(_ sender: Any?) {
-        requestQrToken(manual: true)
-    }
-
-    @objc func autoRefreshQrToken() {
-        requestQrToken(manual: false)
+        qrStatusLabel.stringValue = "Regenerating QR token…"
+        qrRegenerateButton.isEnabled = false
+        qrTokenCoordinator?.refresh(manual: true)
     }
 
     @objc func copyQrPayload(_ sender: Any?) {
-        guard let payloadText = latestQrPayloadText else {
+        guard let payloadText = qrTokenCoordinator?.latestPayloadText ?? latestQrPayloadText else {
             qrStatusLabel.stringValue = "No QR payload available to copy."
             return
         }
@@ -947,9 +816,7 @@ private extension ViewController {
     }
 
     func resetQrSection(bridgeOnline: Bool) {
-        clearQrTimers()
         latestQrPayloadText = nil
-        latestQrExpiryDate = nil
         qrImageView.image = nil
         qrCopyPayloadButton.isEnabled = false
         qrRegenerateButton.isEnabled = bridgeOnline
@@ -1030,65 +897,14 @@ private extension ViewController {
     }
 
     private func fetchHostResourceStatus(completion: @escaping (HostResourceStatus?) -> Void) {
-        var request = URLRequest(url: hostBridgeBaseURL.appendingPathComponent("api/status"))
-        request.timeoutInterval = 1.5
-        URLSession.shared.dataTask(with: request) { data, _, error in
-            guard error == nil, let data = data else {
+        hostBridgeClient.fetchStatus { result in
+            switch result {
+            case .success(let status):
+                completion(status)
+            case .failure:
                 completion(nil)
-                return
             }
-            guard
-                let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let status = root["status"] as? [String: Any]
-            else {
-                completion(nil)
-                return
-            }
-
-            let paired = status["paired"] as? Bool ?? false
-            let hostStatus = status["hostStatus"] as? String ?? (paired ? "Paired" : "Not Paired")
-            let phone = status["phone"] as? [String: Any]
-            let resources = status["resources"] as? [String: Any]
-            let capabilities = status["capabilities"] as? [String: Any]
-            let phoneCamera = status["phoneCamera"] as? [String: Any]
-            let camera = resources?["camera"] as? Bool ?? false
-            let microphone = resources?["microphone"] as? Bool ?? false
-            let speaker = resources?["speaker"] as? Bool ?? false
-            let cameraLens = ((phoneCamera?["lens"] as? String) ?? "back")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-            let cameraOrientationMode = ((phoneCamera?["orientationMode"] as? String) ?? "auto")
-                .trimmingCharacters(in: .whitespacesAndNewlines)
-                .lowercased()
-            let cameraAvailable = capabilities?["camera"] as? Bool ?? true
-            let microphoneAvailable = capabilities?["microphone"] as? Bool ?? true
-            let speakerAvailable = capabilities?["speaker"] as? Bool ?? true
-            let streamUrl = status["cameraStreamUrl"] as? String
-            let issues = (status["issues"] as? [[String: Any]] ?? []).compactMap { issue in
-                let resource = issue["resource"] as? String ?? "resource"
-                let message = issue["message"] as? String ?? "unknown issue"
-                return "\(resource): \(message)"
-            }
-
-            completion(
-                HostResourceStatus(
-                    paired: paired,
-                    hostStatus: hostStatus,
-                    phoneName: phone?["deviceName"] as? String,
-                    phoneId: phone?["deviceId"] as? String,
-                    camera: camera,
-                    microphone: microphone,
-                    speaker: speaker,
-                    cameraLens: cameraLens,
-                    cameraOrientationMode: cameraOrientationMode,
-                    cameraAvailable: cameraAvailable,
-                    microphoneAvailable: microphoneAvailable,
-                    speakerAvailable: speakerAvailable,
-                    cameraStreamUrl: streamUrl?.trimmingCharacters(in: .whitespacesAndNewlines),
-                    issues: issues
-                )
-            )
-        }.resume()
+        }
     }
 
     func refreshHostResourceStatus() {
@@ -1145,355 +961,33 @@ private extension ViewController {
     }
 
     func configureInterface() {
-        view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.windowBackgroundColor.cgColor
+        let refs = CameraMainViewBuilder().build(in: view, target: self)
+        statusBadge = refs.statusBadge
+        statusDetailLabel = refs.statusDetailLabel
+        streamDemandLabel = refs.streamDemandLabel
+        hostBridgeBadge = refs.hostBridgeBadge
+        hostBridgeDetailLabel = refs.hostBridgeDetailLabel
+        hostBridgeStartButton = refs.hostBridgeStartButton
+        hostBridgeOpenButton = refs.hostBridgeOpenButton
+        qrStatusLabel = refs.qrStatusLabel
+        qrExpiryLabel = refs.qrExpiryLabel
+        qrImageView = refs.qrImageView
+        qrRegenerateButton = refs.qrRegenerateButton
+        qrCopyPayloadButton = refs.qrCopyPayloadButton
+        resourceStatusBadge = refs.resourceStatusBadge
+        phoneIdentityLabel = refs.phoneIdentityLabel
+        resourceIssuesLabel = refs.resourceIssuesLabel
+        cameraStatusChip = refs.cameraStatusChip
+        microphoneStatusChip = refs.microphoneStatusChip
+        speakerStatusChip = refs.speakerStatusChip
+        cameraLensValueLabel = refs.cameraLensValueLabel
+        cameraOrientationValueLabel = refs.cameraOrientationValueLabel
+        syncResourceButton = refs.syncResourceButton
+        logTextView = refs.logTextView
 
-        let rootStack = NSStackView()
-        rootStack.orientation = .vertical
-        rootStack.spacing = 14
-        rootStack.translatesAutoresizingMaskIntoConstraints = false
-        view.addSubview(rootStack)
-
-        NSLayoutConstraint.activate([
-            rootStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 18),
-            rootStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
-            rootStack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16),
-        ])
-
-        let titleLabel = NSTextField(labelWithString: "Phone AV Bridge Camera")
-        titleLabel.font = NSFont.systemFont(ofSize: 30, weight: .bold)
-        titleLabel.textColor = .labelColor
-
-        let subtitleLabel = NSTextField(labelWithString: "Runs your virtual camera extension and receives live frames from host bridge.")
-        subtitleLabel.font = NSFont.systemFont(ofSize: 14, weight: .regular)
-        subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.lineBreakMode = .byWordWrapping
-        subtitleLabel.maximumNumberOfLines = 2
-
-        rootStack.addArrangedSubview(titleLabel)
-        rootStack.addArrangedSubview(subtitleLabel)
-
-        let hostCard = NSBox()
-        hostCard.boxType = .custom
-        hostCard.cornerRadius = 12
-        hostCard.fillColor = NSColor.controlBackgroundColor
-        hostCard.borderColor = NSColor.separatorColor
-        hostCard.borderWidth = 1
-        hostCard.translatesAutoresizingMaskIntoConstraints = false
-        rootStack.addArrangedSubview(hostCard)
-
-        let hostStack = NSStackView()
-        hostStack.orientation = .vertical
-        hostStack.spacing = 8
-        hostStack.translatesAutoresizingMaskIntoConstraints = false
-        hostCard.contentView?.addSubview(hostStack)
-        NSLayoutConstraint.activate([
-            hostStack.topAnchor.constraint(equalTo: hostCard.contentView!.topAnchor, constant: 12),
-            hostStack.leadingAnchor.constraint(equalTo: hostCard.contentView!.leadingAnchor, constant: 12),
-            hostStack.trailingAnchor.constraint(equalTo: hostCard.contentView!.trailingAnchor, constant: -12),
-            hostStack.bottomAnchor.constraint(equalTo: hostCard.contentView!.bottomAnchor, constant: -12),
-        ])
-
-        hostBridgeBadge = NSTextField(labelWithString: "Offline")
-        hostBridgeBadge.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        hostBridgeBadge.alignment = .center
-        hostBridgeBadge.wantsLayer = true
-        hostBridgeBadge.layer?.cornerRadius = 8
-        hostBridgeBadge.layer?.masksToBounds = true
-        hostBridgeBadge.backgroundColor = .clear
-        hostBridgeBadge.drawsBackground = true
-
-        hostBridgeDetailLabel = NSTextField(labelWithString: "Checking host bridge service status...")
-        hostBridgeDetailLabel.font = NSFont.systemFont(ofSize: 13, weight: .regular)
-        hostBridgeDetailLabel.textColor = .secondaryLabelColor
-        hostBridgeDetailLabel.lineBreakMode = .byWordWrapping
-        hostBridgeDetailLabel.maximumNumberOfLines = 2
-
-        let hostControlsRow = NSStackView()
-        hostControlsRow.orientation = .horizontal
-        hostControlsRow.distribution = .fillProportionally
-        hostControlsRow.spacing = 10
-
-        hostBridgeStartButton = NSButton(title: "Start Host Bridge", target: self, action: #selector(startHostBridge(_:)))
-        hostBridgeStartButton.bezelStyle = .rounded
-        hostBridgeStartButton.controlSize = .large
-
-        hostBridgeOpenButton = NSButton(title: "Open Host UI", target: self, action: #selector(openHostBridgeUI(_:)))
-        hostBridgeOpenButton.bezelStyle = .texturedRounded
-        hostBridgeOpenButton.controlSize = .large
-
-        hostControlsRow.addArrangedSubview(hostBridgeStartButton)
-        hostControlsRow.addArrangedSubview(hostBridgeOpenButton)
-
-        hostStack.addArrangedSubview(hostBridgeBadge)
-        hostStack.addArrangedSubview(hostBridgeDetailLabel)
-        hostStack.addArrangedSubview(hostControlsRow)
-
-        let qrContainer = NSStackView()
-        qrContainer.orientation = .horizontal
-        qrContainer.alignment = .top
-        qrContainer.spacing = 12
-
-        qrImageView = NSImageView()
-        qrImageView.wantsLayer = true
-        qrImageView.layer?.borderWidth = 1
-        qrImageView.layer?.borderColor = NSColor.separatorColor.cgColor
-        qrImageView.layer?.cornerRadius = 10
-        qrImageView.imageScaling = .scaleProportionallyUpOrDown
-        qrImageView.imageAlignment = .alignCenter
-        qrImageView.translatesAutoresizingMaskIntoConstraints = false
-        NSLayoutConstraint.activate([
-            qrImageView.widthAnchor.constraint(equalToConstant: 172),
-            qrImageView.heightAnchor.constraint(equalToConstant: 172),
-        ])
-
-        let qrInfoStack = NSStackView()
-        qrInfoStack.orientation = .vertical
-        qrInfoStack.spacing = 4
-
-        let qrTitleLabel = NSTextField(labelWithString: "Phone Pairing QR")
-        qrTitleLabel.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
-        qrTitleLabel.textColor = .labelColor
-
-        qrStatusLabel = NSTextField(labelWithString: "Checking host bridge...")
-        qrStatusLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
-        qrStatusLabel.textColor = .secondaryLabelColor
-        qrStatusLabel.lineBreakMode = .byWordWrapping
-        qrStatusLabel.maximumNumberOfLines = 2
-
-        qrExpiryLabel = NSTextField(labelWithString: "Expiry: unknown")
-        qrExpiryLabel.font = NSFont.monospacedSystemFont(ofSize: 11, weight: .regular)
-        qrExpiryLabel.textColor = .secondaryLabelColor
-
-        let qrButtonsRow = NSStackView()
-        qrButtonsRow.orientation = .horizontal
-        qrButtonsRow.spacing = 8
-
-        qrRegenerateButton = NSButton(title: "Regenerate QR", target: self, action: #selector(regenerateQrToken(_:)))
-        qrRegenerateButton.bezelStyle = .rounded
-        qrRegenerateButton.controlSize = .regular
-
-        qrCopyPayloadButton = NSButton(title: "Copy Payload", target: self, action: #selector(copyQrPayload(_:)))
-        qrCopyPayloadButton.bezelStyle = .texturedRounded
-        qrCopyPayloadButton.controlSize = .regular
-
-        qrButtonsRow.addArrangedSubview(qrRegenerateButton)
-        qrButtonsRow.addArrangedSubview(qrCopyPayloadButton)
-
-        qrInfoStack.addArrangedSubview(qrTitleLabel)
-        qrInfoStack.addArrangedSubview(qrStatusLabel)
-        qrInfoStack.addArrangedSubview(qrExpiryLabel)
-        qrInfoStack.addArrangedSubview(qrButtonsRow)
-
-        qrContainer.addArrangedSubview(qrImageView)
-        qrContainer.addArrangedSubview(qrInfoStack)
-        hostStack.addArrangedSubview(qrContainer)
-
-        let divider = NSBox()
-        divider.boxType = .separator
-        hostStack.addArrangedSubview(divider)
-
-        resourceStatusBadge = NSTextField(labelWithString: "Unavailable")
-        resourceStatusBadge.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        resourceStatusBadge.alignment = .center
-        resourceStatusBadge.wantsLayer = true
-        resourceStatusBadge.layer?.cornerRadius = 8
-        resourceStatusBadge.layer?.masksToBounds = true
-        resourceStatusBadge.backgroundColor = .clear
-        resourceStatusBadge.drawsBackground = true
-
-        phoneIdentityLabel = NSTextField(labelWithString: "Phone: unknown")
-        phoneIdentityLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
-        phoneIdentityLabel.textColor = .secondaryLabelColor
-        phoneIdentityLabel.lineBreakMode = .byTruncatingMiddle
-
-        resourceIssuesLabel = NSTextField(labelWithString: "Issues: n/a")
-        resourceIssuesLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
-        resourceIssuesLabel.textColor = .secondaryLabelColor
-        resourceIssuesLabel.lineBreakMode = .byWordWrapping
-        resourceIssuesLabel.maximumNumberOfLines = 2
-
-        func makeResourceRow(_ name: String) -> (NSStackView, NSTextField) {
-            let row = NSStackView()
-            row.orientation = .horizontal
-            row.alignment = .centerY
-            row.distribution = .equalSpacing
-
-            let label = NSTextField(labelWithString: name)
-            label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-            label.textColor = .labelColor
-
-            let chip = NSTextField(labelWithString: "  Off  ")
-            chip.font = NSFont.systemFont(ofSize: 11, weight: .semibold)
-            chip.alignment = .center
-            chip.wantsLayer = true
-            chip.layer?.cornerRadius = 8
-            chip.layer?.masksToBounds = true
-            chip.backgroundColor = .clear
-            chip.drawsBackground = true
-            chip.textColor = .white
-            chip.layer?.backgroundColor = NSColor.systemGray.cgColor
-
-            row.addArrangedSubview(label)
-            row.addArrangedSubview(chip)
-            return (row, chip)
-        }
-
-        let (cameraRow, cameraChip) = makeResourceRow("Camera")
-        cameraStatusChip = cameraChip
-        let (microphoneRow, microphoneChip) = makeResourceRow("Microphone")
-        microphoneStatusChip = microphoneChip
-        let (speakerRow, speakerChip) = makeResourceRow("Speaker")
-        speakerStatusChip = speakerChip
-
-        func makeMetadataRow(_ name: String, initialValue: String) -> (NSStackView, NSTextField) {
-            let row = NSStackView()
-            row.orientation = .horizontal
-            row.alignment = .centerY
-            row.distribution = .equalSpacing
-
-            let label = NSTextField(labelWithString: name)
-            label.font = NSFont.systemFont(ofSize: 13, weight: .medium)
-            label.textColor = .labelColor
-
-            let value = NSTextField(labelWithString: initialValue)
-            value.font = NSFont.systemFont(ofSize: 12, weight: .regular)
-            value.textColor = .secondaryLabelColor
-
-            row.addArrangedSubview(label)
-            row.addArrangedSubview(value)
-            return (row, value)
-        }
-
-        let (lensRow, lensValue) = makeMetadataRow("Camera Lens", initialValue: "Unknown")
-        cameraLensValueLabel = lensValue
-        let (orientationRow, orientationValue) = makeMetadataRow("Orientation", initialValue: "Unknown")
-        cameraOrientationValueLabel = orientationValue
-
-        let resourceControlsRow = NSStackView()
-        resourceControlsRow.orientation = .horizontal
-        resourceControlsRow.distribution = .fillProportionally
-        resourceControlsRow.spacing = 10
-        syncResourceButton = NSButton(title: "Refresh Status", target: self, action: #selector(syncHostResourceStatus(_:)))
-        syncResourceButton.bezelStyle = .texturedRounded
-        syncResourceButton.controlSize = .large
-        resourceControlsRow.addArrangedSubview(syncResourceButton)
-
-        hostStack.addArrangedSubview(resourceStatusBadge)
-        hostStack.addArrangedSubview(phoneIdentityLabel)
-        hostStack.addArrangedSubview(resourceIssuesLabel)
-        hostStack.addArrangedSubview(cameraRow)
-        hostStack.addArrangedSubview(microphoneRow)
-        hostStack.addArrangedSubview(speakerRow)
-        hostStack.addArrangedSubview(lensRow)
-        hostStack.addArrangedSubview(orientationRow)
-        hostStack.addArrangedSubview(resourceControlsRow)
         updateHostBridgeBadge("Offline", color: .systemOrange)
         resetQrSection(bridgeOnline: false)
         resetHostResourceSection(bridgeOnline: false)
-
-        let statusCard = NSBox()
-        statusCard.boxType = .custom
-        statusCard.cornerRadius = 12
-        statusCard.fillColor = NSColor.controlBackgroundColor
-        statusCard.borderColor = NSColor.separatorColor
-        statusCard.borderWidth = 1
-        statusCard.translatesAutoresizingMaskIntoConstraints = false
-        rootStack.addArrangedSubview(statusCard)
-
-        let statusStack = NSStackView()
-        statusStack.orientation = .vertical
-        statusStack.spacing = 8
-        statusStack.translatesAutoresizingMaskIntoConstraints = false
-        statusCard.contentView?.addSubview(statusStack)
-        NSLayoutConstraint.activate([
-            statusStack.topAnchor.constraint(equalTo: statusCard.contentView!.topAnchor, constant: 12),
-            statusStack.leadingAnchor.constraint(equalTo: statusCard.contentView!.leadingAnchor, constant: 12),
-            statusStack.trailingAnchor.constraint(equalTo: statusCard.contentView!.trailingAnchor, constant: -12),
-            statusStack.bottomAnchor.constraint(equalTo: statusCard.contentView!.bottomAnchor, constant: -12),
-        ])
-
-        statusBadge = NSTextField(labelWithString: "Idle")
-        statusBadge.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        statusBadge.alignment = .center
-        statusBadge.wantsLayer = true
-        statusBadge.layer?.cornerRadius = 8
-        statusBadge.layer?.masksToBounds = true
-        statusBadge.backgroundColor = NSColor.clear
-        statusBadge.drawsBackground = true
-
-        statusDetailLabel = NSTextField(labelWithString: "Preparing frame server and extension environment…")
-        statusDetailLabel.font = NSFont.systemFont(ofSize: 13, weight: .regular)
-        statusDetailLabel.textColor = .secondaryLabelColor
-        statusDetailLabel.lineBreakMode = .byWordWrapping
-        statusDetailLabel.maximumNumberOfLines = 2
-
-        streamDemandLabel = NSTextField(labelWithString: "Capture demand: unknown")
-        streamDemandLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        streamDemandLabel.textColor = .secondaryLabelColor
-
-        let controlsRow = NSStackView()
-        controlsRow.orientation = .horizontal
-        controlsRow.distribution = .fillProportionally
-        controlsRow.spacing = 10
-
-        let enableButton = NSButton(title: "Enable Extension", target: self, action: #selector(activate(_:)))
-        enableButton.bezelStyle = .rounded
-        enableButton.controlSize = .large
-
-        let disableButton = NSButton(title: "Disable Extension", target: self, action: #selector(deactivate(_:)))
-        disableButton.bezelStyle = .rounded
-        disableButton.controlSize = .large
-
-        let settingsButton = NSButton(title: "Open Settings", target: self, action: #selector(openExtensionsSettings(_:)))
-        settingsButton.bezelStyle = .texturedRounded
-        settingsButton.controlSize = .large
-
-        controlsRow.addArrangedSubview(enableButton)
-        controlsRow.addArrangedSubview(disableButton)
-        controlsRow.addArrangedSubview(settingsButton)
-
-        statusStack.addArrangedSubview(statusBadge)
-        statusStack.addArrangedSubview(statusDetailLabel)
-        statusStack.addArrangedSubview(streamDemandLabel)
-        statusStack.addArrangedSubview(controlsRow)
-
-        let logsHeader = NSStackView()
-        logsHeader.orientation = .horizontal
-        logsHeader.alignment = .centerY
-        logsHeader.distribution = .equalSpacing
-
-        let logsTitle = NSTextField(labelWithString: "Runtime Log")
-        logsTitle.font = NSFont.systemFont(ofSize: 15, weight: .semibold)
-
-        let clearButton = NSButton(title: "Clear", target: self, action: #selector(clearLog(_:)))
-        clearButton.bezelStyle = .rounded
-
-        logsHeader.addArrangedSubview(logsTitle)
-        logsHeader.addArrangedSubview(clearButton)
-        rootStack.addArrangedSubview(logsHeader)
-
-        let logScroll = NSScrollView()
-        logScroll.hasVerticalScroller = true
-        logScroll.autohidesScrollers = true
-        logScroll.borderType = .bezelBorder
-        logScroll.translatesAutoresizingMaskIntoConstraints = false
-        rootStack.addArrangedSubview(logScroll)
-        NSLayoutConstraint.activate([
-            logScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 280),
-        ])
-
-        let textView = NSTextView()
-        textView.isEditable = false
-        textView.isSelectable = true
-        textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
-        textView.textColor = .labelColor
-        textView.backgroundColor = NSColor.textBackgroundColor
-        textView.string = "Phone AV Bridge Camera initialized.\n"
-        logScroll.documentView = textView
-        self.logTextView = textView
-
         updateStatusBadge("Idle", color: .systemOrange)
     }
 

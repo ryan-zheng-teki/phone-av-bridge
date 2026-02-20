@@ -25,8 +25,10 @@ import org.autobyteus.phoneavbridge.model.ResourceToggleState
 import org.autobyteus.phoneavbridge.network.HostApiClient
 import org.autobyteus.phoneavbridge.network.HostDiscoveryClient
 import org.autobyteus.phoneavbridge.network.LanAddressResolver
-import org.autobyteus.phoneavbridge.network.QrPairPayloadParser
+import org.autobyteus.phoneavbridge.pairing.PairingCoordinator
+import org.autobyteus.phoneavbridge.publish.ResourcePublishCoordinator
 import org.autobyteus.phoneavbridge.service.ResourceService
+import org.autobyteus.phoneavbridge.sync.HostStateRefresher
 import org.autobyteus.phoneavbridge.session.BridgeSessionStateMachine
 import org.autobyteus.phoneavbridge.session.SessionState
 import org.autobyteus.phoneavbridge.store.AppPrefs
@@ -52,7 +54,10 @@ class MainActivity : AppCompatActivity() {
   private val sessionStateMachine = BridgeSessionStateMachine()
   private val hostApiClient = HostApiClient()
   private val hostDiscoveryClient = HostDiscoveryClient()
+  private val pairingCoordinator = PairingCoordinator(hostApiClient, hostDiscoveryClient)
+  private val hostStateRefresher = HostStateRefresher(hostApiClient, hostDiscoveryClient)
   private val ioExecutor = Executors.newSingleThreadScheduledExecutor()
+  private lateinit var resourcePublishCoordinator: ResourcePublishCoordinator
   private var pendingPermissionToggle: (() -> Unit)? = null
   private var isUpdatingUi = false
   private var pairingInProgress = false
@@ -63,7 +68,6 @@ class MainActivity : AppCompatActivity() {
   @Volatile private var lastHostStatusError: String? = null
   @Volatile private var discoveredHostPreview: DiscoveredHost? = null
   @Volatile private var discoveredHostCandidates: List<DiscoveredHost> = emptyList()
-  @Volatile private var publishGeneration = 0
   private val localDeviceName by lazy { DeviceIdentityResolver.resolveDeviceName(this) }
   private val localDeviceId by lazy { DeviceIdentityResolver.resolveDeviceId(this) }
 
@@ -105,6 +109,13 @@ class MainActivity : AppCompatActivity() {
     speakerSwitch = findViewById(R.id.speakerSwitch)
     cameraLensGroup = findViewById(R.id.cameraLensGroup)
     cameraOrientationGroup = findViewById(R.id.cameraOrientationGroup)
+    resourcePublishCoordinator = ResourcePublishCoordinator(
+      hostApiClient = hostApiClient,
+      ioExecutor = ioExecutor,
+      localDeviceName = localDeviceName,
+      localDeviceId = localDeviceId,
+      logTag = logTag,
+    )
 
     setupListeners()
     updateUiFromPrefs()
@@ -244,7 +255,7 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun beginQrPairingFlow(rawPayload: String) {
-    val payload = QrPairPayloadParser.parse(rawPayload)
+    val payload = pairingCoordinator.parseQrPayload(rawPayload)
     if (payload == null) {
       val preview = rawPayload.take(120).replace("\n", " ")
       Log.w(logTag, "QR parse failed. payloadPreview=$preview")
@@ -259,7 +270,7 @@ class MainActivity : AppCompatActivity() {
 
     ioExecutor.execute {
       try {
-        val host = hostApiClient.redeemQrToken(payload.baseUrl, payload.token)
+        val host = pairingCoordinator.redeemQrPayload(payload)
         Log.i(logTag, "QR redeem success baseUrl=${host.baseUrl}")
         discoveredHostPreview = host
         discoveredHostCandidates = listOf(host)
@@ -292,7 +303,12 @@ class MainActivity : AppCompatActivity() {
 
     ioExecutor.execute {
       try {
-        val hosts = discoverHostsForPair()
+        val hosts = pairingCoordinator.discoverHostsForPair(
+          savedBaseUrl = AppPrefs.getHostBaseUrl(this),
+          savedPairCode = AppPrefs.getHostPairCode(this),
+          isLikelyEmulator = isLikelyEmulator(),
+          isLoopbackBaseUrl = ::isLoopbackBaseUrl,
+        )
         discoveredHostCandidates = hosts
         runOnUiThread {
           pairingInProgress = false
@@ -324,10 +340,18 @@ class MainActivity : AppCompatActivity() {
 
   private fun showHostSelectionDialog(hosts: List<DiscoveredHost>) {
     val labels = hosts.map { formatHostLabel(it) }.toTypedArray()
+    var selectedIndex = hosts.indexOfFirst { it.baseUrl == discoveredHostPreview?.baseUrl }
+    if (selectedIndex < 0) {
+      selectedIndex = 0
+    }
+
     AlertDialog.Builder(this)
       .setTitle(R.string.select_host_title)
-      .setItems(labels) { _, which ->
-        pairHost(hosts[which])
+      .setSingleChoiceItems(labels, selectedIndex) { _, which ->
+        selectedIndex = which
+      }
+      .setPositiveButton(R.string.select_host_confirm_button) { _, _ ->
+        pairHost(hosts[selectedIndex])
       }
       .setNegativeButton(android.R.string.cancel, null)
       .show()
@@ -347,20 +371,19 @@ class MainActivity : AppCompatActivity() {
     ioExecutor.execute {
       try {
         sessionStateMachine.onPairStart()
-        discoveredHostPreview = host
-        hostApiClient.pair(
-          baseUrl = host.baseUrl,
-          pairCode = host.pairingCode,
+        val pairResult = pairingCoordinator.pairHost(
+          host = host,
           deviceName = localDeviceName,
           deviceId = localDeviceId,
         )
+        discoveredHostPreview = pairResult.host
 
-        AppPrefs.setHostBaseUrl(this, host.baseUrl)
-        AppPrefs.setHostPairCode(this, host.pairingCode)
+        AppPrefs.setHostBaseUrl(this, pairResult.host.baseUrl)
+        AppPrefs.setHostPairCode(this, pairResult.host.pairingCode)
         AppPrefs.setPaired(this, true)
         sessionStateMachine.onPairSuccess()
         lastHostStatusError = null
-        lastHostStatus = hostApiClient.fetchStatus(host.baseUrl).also {
+        lastHostStatus = pairResult.snapshot.also {
           hostCapabilities = it.capabilities
           hostCapabilitiesLoaded = true
         }
@@ -397,13 +420,10 @@ class MainActivity : AppCompatActivity() {
 
     ioExecutor.execute {
       try {
-        val hostBaseUrl = AppPrefs.getHostBaseUrl(this)
-        if (hostBaseUrl.isNotBlank()) {
-          try {
-            hostApiClient.unpair(hostBaseUrl)
-          } catch (_: Exception) {
-            // Keep local unpair robust even when host is unreachable.
-          }
+        try {
+          pairingCoordinator.unpairHost(AppPrefs.getHostBaseUrl(this))
+        } catch (_: Exception) {
+          // Keep local unpair robust even when host is unreachable.
         }
         AppPrefs.setPaired(this, false)
         AppPrefs.clearResourceToggles(this)
@@ -426,39 +446,6 @@ class MainActivity : AppCompatActivity() {
         }
       }
     }
-  }
-
-  private fun discoverHostsForPair(): List<DiscoveredHost> {
-    hostDiscoveryClient.discoverAll(timeoutMs = 2500).takeIf { it.isNotEmpty() }?.let { return it }
-    hostDiscoveryClient.discoverAll(timeoutMs = 4000).takeIf { it.isNotEmpty() }?.let { return it }
-
-    val savedBaseUrl = AppPrefs.getHostBaseUrl(this)
-    val savedPairCode = AppPrefs.getHostPairCode(this)
-    if (savedBaseUrl.isNotBlank() && !isLoopbackBaseUrl(savedBaseUrl)) {
-      try {
-        return listOf(hostApiClient.fetchBootstrap(savedBaseUrl))
-      } catch (_: Exception) {
-      }
-    }
-    if (savedBaseUrl.isNotBlank() && savedPairCode.isNotBlank() && !isLoopbackBaseUrl(savedBaseUrl)) {
-      return listOf(DiscoveredHost(savedBaseUrl, savedPairCode))
-    }
-
-    val bootstrapCandidates = if (isLikelyEmulator()) {
-      listOf(
-        "http://10.0.2.2:8787",
-        "http://127.0.0.1:8787",
-      )
-    } else {
-      emptyList()
-    }
-    bootstrapCandidates.forEach { candidate ->
-      try {
-        return listOf(hostApiClient.fetchBootstrap(candidate))
-      } catch (_: Exception) {
-      }
-    }
-    return emptyList()
   }
 
   private fun updateUiFromPrefs() {
@@ -598,59 +585,22 @@ class MainActivity : AppCompatActivity() {
 
     val hostBaseUrl = AppPrefs.getHostBaseUrl(this)
     if (hostBaseUrl.isNotBlank()) {
-      publishGeneration += 1
-      publishTogglesWithRetry(
+      resourcePublishCoordinator.publishWithRetry(
         hostBaseUrl = hostBaseUrl,
         state = state,
-        generation = publishGeneration,
-      )
-    }
-  }
-
-  private fun publishTogglesWithRetry(
-    hostBaseUrl: String,
-    state: ResourceToggleState,
-    generation: Int,
-    attempt: Int = 0,
-  ) {
-    ioExecutor.execute {
-      if (generation != publishGeneration) return@execute
-
-      try {
-        hostApiClient.publishToggles(
-          baseUrl = hostBaseUrl,
-          state = state,
-          deviceName = localDeviceName,
-          deviceId = localDeviceId,
-        )
-        runOnUiThread {
-          if (generation == publishGeneration) {
+        onSuccess = {
+          runOnUiThread {
             lastHostStatusError = null
             updateUiFromPrefs()
           }
-        }
-      } catch (error: Exception) {
-        Log.w(logTag, "Toggle publish failed (attempt=$attempt, generation=$generation): ${error.message}")
-        runOnUiThread {
-          if (generation == publishGeneration) {
-            lastHostStatusError = error.message ?: "publish failed"
+        },
+        onFailure = { message ->
+          runOnUiThread {
+            lastHostStatusError = message
             updateUiFromPrefs()
           }
-        }
-        if (attempt >= 3) return@execute
-        ioExecutor.schedule(
-          {
-            publishTogglesWithRetry(
-              hostBaseUrl = hostBaseUrl,
-              state = state,
-              generation = generation,
-              attempt = attempt + 1,
-            )
-          },
-          2,
-          TimeUnit.SECONDS,
-        )
-      }
+        },
+      )
     }
   }
 
@@ -692,57 +642,42 @@ class MainActivity : AppCompatActivity() {
     }
 
     ioExecutor.execute {
-      var hostConfirmsPaired = false
-      var forceStopService = false
-      var resourceDriftDetected = false
-      val refreshed = try {
-        val snapshot = hostApiClient.fetchStatus(hostBaseUrl)
-        hostCapabilitiesLoaded = true
-        hostCapabilities = snapshot.capabilities
-        lastHostStatus = snapshot
-        lastHostStatusError = null
-        hostConfirmsPaired = snapshot.paired
-        if (!snapshot.paired) {
-          AppPrefs.setPaired(this, false)
-          AppPrefs.clearResourceToggles(this)
-          forceStopService = true
-        } else {
-          val desiredCamera = AppPrefs.isCameraEnabled(this)
-          val desiredMic = AppPrefs.isMicEnabled(this)
-          val desiredSpeaker = AppPrefs.isSpeakerEnabled(this)
-          val desiredLens = AppPrefs.getCameraLens(this)
-          val desiredOrientationMode = AppPrefs.getCameraOrientationMode(this)
-          val cameraMetadataDrift = snapshot.hasCameraMetadata && (
-            desiredLens != snapshot.cameraLens ||
-              desiredOrientationMode != snapshot.cameraOrientationMode
-            )
-          resourceDriftDetected = desiredCamera != snapshot.cameraEnabled ||
-            desiredMic != snapshot.microphoneEnabled ||
-            desiredSpeaker != snapshot.speakerEnabled ||
-            cameraMetadataDrift
-        }
-        true
-      } catch (error: Exception) {
-        hostCapabilitiesLoaded = false
-        lastHostStatus = null
-        lastHostStatusError = error.message ?: "status check failed"
-        false
+      val refreshResult = hostStateRefresher.refreshPairedHost(
+        HostStateRefresher.RefreshRequest(
+          hostBaseUrl = hostBaseUrl,
+          desiredCameraEnabled = AppPrefs.isCameraEnabled(this),
+          desiredMicrophoneEnabled = AppPrefs.isMicEnabled(this),
+          desiredSpeakerEnabled = AppPrefs.isSpeakerEnabled(this),
+          desiredLens = AppPrefs.getCameraLens(this),
+          desiredOrientationMode = AppPrefs.getCameraOrientationMode(this),
+        ),
+      )
+
+      hostCapabilitiesLoaded = refreshResult.capabilitiesLoaded
+      hostCapabilities = refreshResult.capabilities
+      lastHostStatus = refreshResult.snapshot
+      lastHostStatusError = refreshResult.errorMessage
+
+      if (refreshResult.forceUnpair) {
+        AppPrefs.setPaired(this, false)
+        AppPrefs.clearResourceToggles(this)
       }
+
       runOnUiThread {
-        if (forceStopService) {
+        if (refreshResult.forceUnpair) {
           val intent = ResourceService.buildIntent(this, ResourceToggleState())
           stopService(intent)
         }
-        if (resourceDriftDetected) {
+        if (refreshResult.resourceDriftDetected) {
           lastHostStatusError = "Host sync drift detected. Retrying resource sync."
         }
         updateUiFromPrefs()
-        if (resourceDriftDetected) {
+        if (refreshResult.resourceDriftDetected) {
           applyForegroundServiceState()
           return@runOnUiThread
         }
         if (!applyServiceState) return@runOnUiThread
-        if (refreshed && hostConfirmsPaired) {
+        if (refreshResult.snapshot != null && refreshResult.hostConfirmsPaired) {
           applyForegroundServiceState()
         } else if (!AppPrefs.isPaired(this)) {
           val intent = ResourceService.buildIntent(this, ResourceToggleState())
@@ -756,15 +691,10 @@ class MainActivity : AppCompatActivity() {
     if (hostStatusTicker != null && !hostStatusTicker!!.isCancelled) {
       return
     }
-    hostStatusTicker = ioExecutor.scheduleAtFixedRate(
-      {
+    hostStatusTicker = hostStateRefresher.startTicker(ioExecutor) {
         refreshHostStatusIfPaired(applyServiceState = false)
         refreshHostPreviewIfUnpaired()
-      },
-      3,
-      5,
-      TimeUnit.SECONDS,
-    )
+      }
   }
 
   private fun refreshHostPreviewIfUnpaired() {
@@ -789,29 +719,12 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun discoverHostPreview(): DiscoveredHost? {
-    hostDiscoveryClient.discoverAll(timeoutMs = 1200).firstOrNull()?.let { return it }
-
-    val savedBaseUrl = AppPrefs.getHostBaseUrl(this)
-    val savedPairCode = AppPrefs.getHostPairCode(this)
-    if (savedBaseUrl.isNotBlank() && !isLoopbackBaseUrl(savedBaseUrl)) {
-      try {
-        return hostApiClient.fetchBootstrap(savedBaseUrl)
-      } catch (_: Exception) {
-      }
-    }
-    if (savedBaseUrl.isNotBlank() && savedPairCode.isNotBlank() && !isLoopbackBaseUrl(savedBaseUrl)) {
-      return DiscoveredHost(savedBaseUrl, savedPairCode)
-    }
-
-    if (isLikelyEmulator()) {
-      listOf("http://10.0.2.2:8787", "http://127.0.0.1:8787").forEach { candidate ->
-        try {
-          return hostApiClient.fetchBootstrap(candidate)
-        } catch (_: Exception) {
-        }
-      }
-    }
-    return null
+    return hostStateRefresher.discoverHostPreview(
+      savedBaseUrl = AppPrefs.getHostBaseUrl(this),
+      savedPairCode = AppPrefs.getHostPairCode(this),
+      isLikelyEmulator = isLikelyEmulator(),
+      isLoopbackBaseUrl = ::isLoopbackBaseUrl,
+    )
   }
 
   private fun hasKnownHostCandidate(): Boolean {

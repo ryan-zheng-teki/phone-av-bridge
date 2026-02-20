@@ -70,6 +70,68 @@ cd android-phone-av-bridge
 ./gradlew testDebugUnitTest
 ```
 
+### macOS camera app (local dev build + install)
+
+```bash
+cd macos-camera-extension
+./scripts/build-signed-local.sh
+```
+
+Default behavior of `build-signed-local.sh`:
+- cleans old local build output first,
+- builds with project-local derived data (`macos-camera-extension/build`),
+- installs to `~/Applications/PhoneAVBridgeCamera.app`,
+- prunes duplicate `/Applications/PhoneAVBridgeCamera.app` copies.
+
+### Real-Device Startup Checklist (Important)
+
+Use this for physical Android testing, especially when multiple hosts are on the same LAN.
+
+1. Resolve this Mac/Linux host LAN IP (example on macOS):
+
+```bash
+ipconfig getifaddr en0
+```
+
+2. Start host with explicit bind/advertise/port values:
+
+```bash
+cd desktop-av-bridge-host
+HOST_BIND=0.0.0.0 ADVERTISED_HOST=<LAN_IP> PORT=8787 node desktop-app/server.mjs
+```
+
+3. Verify host health and advertised bootstrap URL:
+
+```bash
+curl -s http://127.0.0.1:8787/health
+curl -s http://127.0.0.1:8787/api/bootstrap | jq '.bootstrap.baseUrl,.bootstrap.pairingCode'
+```
+
+4. In Android `Pair Host`, if a host picker appears, select the entry whose URL matches `<LAN_IP>:8787`.
+
+5. Only use loopback advertise mode for USB-reverse debugging:
+
+```bash
+adb reverse tcp:8787 tcp:8787
+HOST_BIND=0.0.0.0 ADVERTISED_HOST=127.0.0.1 PORT=8787 node desktop-app/server.mjs
+```
+
+Troubleshooting:
+- If Android keeps pairing to a wrong remembered host, clear app state and retry:
+
+```bash
+adb shell pm clear org.autobyteus.phoneavbridge
+```
+
+- If macOS seems to open an old camera app build, force deterministic launch path:
+
+```bash
+pkill -f 'PhoneAVBridgeCamera.app/Contents/MacOS/PhoneAVBridgeCamera' || true
+open "$HOME/Applications/PhoneAVBridgeCamera.app"
+```
+
+- Reason: `open -a PhoneAVBridgeCamera` prefers `/Applications/PhoneAVBridgeCamera.app` if multiple copies exist (`/Applications` and `~/Applications`), which can start an older bundle.
+
 ## Current Linux User Flow (Preview)
 
 1. Install host app with `desktop-av-bridge-host/installers/linux/install.sh`.

@@ -23,16 +23,24 @@ This runs `xcodebuild` with:
 
 - `-allowProvisioningUpdates`
 - `-allowProvisioningDeviceRegistration`
+- `-derivedDataPath ./build` (project-local derived data)
 
 and produces a signed `PhoneAVBridgeCamera.app`.
 
-Install to `/Applications` for activation tests:
+By default it also:
+
+- cleans previous local derived data first,
+- installs to `~/Applications/PhoneAVBridgeCamera.app`,
+- prunes duplicate `/Applications/PhoneAVBridgeCamera.app` copies to avoid launching stale bundles.
+
+Optional toggles:
 
 ```bash
-sudo rm -rf /Applications/PhoneAVBridgeCamera.app
-sudo ditto "<derived-data>/Build/Products/Debug/PhoneAVBridgeCamera.app" /Applications/PhoneAVBridgeCamera.app
-sudo xattr -dr com.apple.quarantine /Applications/PhoneAVBridgeCamera.app
-open -a /Applications/PhoneAVBridgeCamera.app
+# build only (skip install/open)
+INSTALL_AFTER_BUILD=0 ./scripts/build-signed-local.sh
+
+# keep duplicate app bundles (disable prune)
+PRUNE_DUPLICATE_CAMERA_BUNDLES=0 ./scripts/build-signed-local.sh
 ```
 
 If you installed from a GitHub Release zip, run the same quarantine command after copying the app bundle to `/Applications`.

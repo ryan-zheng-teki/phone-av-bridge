@@ -28,6 +28,7 @@
     <string name="scan_qr_invalid">Invalid QR code. Scan a Phone AV Bridge pairing QR code.</string>
     <string name="scan_qr_requires_unpair">Unpair current host before scanning a new QR code.</string>
     <string name="select_host_title">Select Host to Pair</string>
+    <string name="select_host_confirm_button">Pair</string>
     <string name="toggle_camera">Enable Camera</string>
     <string name="toggle_microphone">Enable Microphone</string>
     <string name="toggle_speaker">Enable Speaker</string>

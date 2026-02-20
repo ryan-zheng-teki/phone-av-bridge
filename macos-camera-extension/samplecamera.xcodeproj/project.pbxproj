@@ -16,6 +16,9 @@
 		F990A885286F666500159819 /* org.autobyteus.phoneavbridge.camera.extension.systemextension in Embed System Extensions */ = {isa = PBXBuildFile; fileRef = F990A87B286F666500159819 /* org.autobyteus.phoneavbridge.camera.extension.systemextension */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
 		F990A88B287047FE00159819 /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = F990A88A287047FE00159819 /* Config.swift */; };
 		F990A88C287047FE00159819 /* Config.swift in Sources */ = {isa = PBXBuildFile; fileRef = F990A88A287047FE00159819 /* Config.swift */; };
+		F9B100012C00100100159819 /* HostBridgeClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9B100112C00100100159819 /* HostBridgeClient.swift */; };
+		F9B100022C00100100159819 /* QrTokenCoordinator.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9B100122C00100100159819 /* QrTokenCoordinator.swift */; };
+		F9B100032C00100100159819 /* CameraMainViewBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = F9B100132C00100100159819 /* CameraMainViewBuilder.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -55,6 +58,9 @@
 		F990A881286F666500159819 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		F990A882286F666500159819 /* cameraextension.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = cameraextension.entitlements; sourceTree = "<group>"; };
 		F990A88A287047FE00159819 /* Config.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Config.swift; sourceTree = "<group>"; };
+		F9B100112C00100100159819 /* HostBridgeClient.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HostBridgeClient.swift; sourceTree = "<group>"; };
+		F9B100122C00100100159819 /* QrTokenCoordinator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QrTokenCoordinator.swift; sourceTree = "<group>"; };
+		F9B100132C00100100159819 /* CameraMainViewBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CameraMainViewBuilder.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -98,11 +104,38 @@
 			children = (
 				F990A868286F663F00159819 /* AppDelegate.swift */,
 				F990A86A286F663F00159819 /* ViewController.swift */,
+				F9B100212C00100100159819 /* host */,
+				F9B100222C00100100159819 /* pairing */,
+				F9B100232C00100100159819 /* ui */,
 				F990A86C286F664500159819 /* Assets.xcassets */,
 				F990A86E286F664500159819 /* Main.storyboard */,
 				F990A871286F664500159819 /* samplecamera.entitlements */,
 			);
 			path = samplecamera;
+			sourceTree = "<group>";
+		};
+		F9B100212C00100100159819 /* host */ = {
+			isa = PBXGroup;
+			children = (
+				F9B100112C00100100159819 /* HostBridgeClient.swift */,
+			);
+			path = host;
+			sourceTree = "<group>";
+		};
+		F9B100222C00100100159819 /* pairing */ = {
+			isa = PBXGroup;
+			children = (
+				F9B100122C00100100159819 /* QrTokenCoordinator.swift */,
+			);
+			path = pairing;
+			sourceTree = "<group>";
+		};
+		F9B100232C00100100159819 /* ui */ = {
+			isa = PBXGroup;
+			children = (
+				F9B100132C00100100159819 /* CameraMainViewBuilder.swift */,
+			);
+			path = ui;
 			sourceTree = "<group>";
 		};
 		F990A87C286F666500159819 /* cameraextension */ = {
@@ -217,6 +250,9 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				F9B100032C00100100159819 /* CameraMainViewBuilder.swift in Sources */,
+				F9B100022C00100100159819 /* QrTokenCoordinator.swift in Sources */,
+				F9B100012C00100100159819 /* HostBridgeClient.swift in Sources */,
 				F990A86B286F663F00159819 /* ViewController.swift in Sources */,
 				F990A869286F663F00159819 /* AppDelegate.swift in Sources */,
 				F990A88B287047FE00159819 /* Config.swift in Sources */,
