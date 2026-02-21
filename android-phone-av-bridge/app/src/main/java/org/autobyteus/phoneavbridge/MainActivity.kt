@@ -26,6 +26,9 @@ import org.autobyteus.phoneavbridge.model.ResourceToggleState
 import org.autobyteus.phoneavbridge.network.HostApiClient
 import org.autobyteus.phoneavbridge.network.HostDiscoveryClient
 import org.autobyteus.phoneavbridge.network.LanAddressResolver
+import org.autobyteus.phoneavbridge.pairing.HostSelectionAction
+import org.autobyteus.phoneavbridge.pairing.HostSelectionSnapshot
+import org.autobyteus.phoneavbridge.pairing.HostSelectionState
 import org.autobyteus.phoneavbridge.pairing.PairingCoordinator
 import org.autobyteus.phoneavbridge.publish.ResourcePublishCoordinator
 import org.autobyteus.phoneavbridge.service.ResourceService
@@ -74,6 +77,12 @@ class MainActivity : AppCompatActivity() {
   @Volatile private var discoveredHostCandidates: List<DiscoveredHost> = emptyList()
   @Volatile private var selectedHostBaseUrl: String? = null
   @Volatile private var hostSelectionExplicitlyChosen = false
+  @Volatile private var hostSelectionSnapshot = HostSelectionSnapshot(
+    candidates = emptyList(),
+    selectedBaseUrl = null,
+    explicitSelection = false,
+    action = HostSelectionAction.SELECT_REQUIRED,
+  )
   private val localDeviceName by lazy { DeviceIdentityResolver.resolveDeviceName(this) }
   private val localDeviceId by lazy { DeviceIdentityResolver.resolveDeviceId(this) }
 
@@ -129,7 +138,7 @@ class MainActivity : AppCompatActivity() {
     setupListeners()
     updateUiFromPrefs()
     refreshHostStatusIfPaired(applyServiceState = true)
-    ioExecutor.execute { refreshHostPreviewIfUnpaired() }
+    ioExecutor.execute { refreshHostCandidates() }
     ensureHostStatusTicker()
   }
 
@@ -144,16 +153,20 @@ class MainActivity : AppCompatActivity() {
   override fun onResume() {
     super.onResume()
     refreshHostStatusIfPaired(applyServiceState = true)
-    ioExecutor.execute { refreshHostPreviewIfUnpaired() }
+    ioExecutor.execute { refreshHostCandidates() }
   }
 
   private fun setupListeners() {
     pairButton.setOnClickListener {
       if (pairingInProgress) return@setOnClickListener
-      if (AppPrefs.isPaired(this)) {
-        unpairHost()
-      } else {
-        beginPairSelectionFlow()
+      when (hostSelectionSnapshot.action) {
+        HostSelectionAction.PAIR -> beginPairSelectionFlow()
+        HostSelectionAction.SWITCH -> beginSwitchHostFlow()
+        HostSelectionAction.UNPAIR -> unpairHost()
+        HostSelectionAction.SELECT_REQUIRED -> {
+          Toast.makeText(this, getString(R.string.pair_select_host_first), Toast.LENGTH_SHORT).show()
+          ioExecutor.execute { refreshHostCandidates() }
+        }
       }
     }
 
@@ -336,7 +349,7 @@ class MainActivity : AppCompatActivity() {
             hosts.isEmpty() -> {
               Toast.makeText(this, getString(R.string.pair_failed_discovery), Toast.LENGTH_LONG).show()
             }
-            hosts.size > 1 && selectedHostBaseUrl == null -> {
+            hostSelectionSnapshot.action == HostSelectionAction.SELECT_REQUIRED -> {
               Toast.makeText(this, getString(R.string.pair_select_host_first), Toast.LENGTH_SHORT).show()
             }
             else -> {
@@ -356,65 +369,143 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
+  private fun beginSwitchHostFlow() {
+    val currentBaseUrl = AppPrefs.getHostBaseUrl(this)
+    val selected = resolveSelectedHostCandidate()
+    if (selected == null) {
+      Toast.makeText(this, getString(R.string.pair_select_host_first), Toast.LENGTH_SHORT).show()
+      return
+    }
+    if (selected.baseUrl == currentBaseUrl) {
+      unpairHost()
+      return
+    }
+
+    pairingInProgress = true
+    updateUiFromPrefs()
+    pairButton.isEnabled = false
+
+    ioExecutor.execute {
+      try {
+        sessionStateMachine.onPairStart()
+        val switchResult = pairingCoordinator.switchHost(
+          currentBaseUrl = currentBaseUrl,
+          targetHost = selected,
+          deviceName = localDeviceName,
+          deviceId = localDeviceId,
+        )
+
+        discoveredHostPreview = switchResult.host
+        AppPrefs.setHostBaseUrl(this, switchResult.host.baseUrl)
+        AppPrefs.setHostPairCode(this, switchResult.host.pairingCode)
+        AppPrefs.setPaired(this, true)
+        sessionStateMachine.onPairSuccess()
+        lastHostStatusError = null
+        lastHostStatus = switchResult.snapshot.also {
+          hostCapabilities = it.capabilities
+          hostCapabilitiesLoaded = true
+        }
+
+        runOnUiThread {
+          updateUiFromPrefs()
+          applyForegroundServiceState()
+          Toast.makeText(this, getString(R.string.switch_success), Toast.LENGTH_SHORT).show()
+        }
+      } catch (error: Exception) {
+        AppPrefs.setPaired(this, false)
+        AppPrefs.clearResourceToggles(this)
+        sessionStateMachine.onUnpair()
+        hostCapabilities = HostCapabilities()
+        hostCapabilitiesLoaded = false
+        lastHostStatus = null
+        lastHostStatusError = error.message ?: "switch failed"
+        runOnUiThread {
+          updateUiFromPrefs()
+          applyForegroundServiceState()
+          ioExecutor.execute { refreshHostCandidates() }
+          Toast.makeText(this, getString(R.string.switch_failed), Toast.LENGTH_LONG).show()
+        }
+      } finally {
+        runOnUiThread {
+          pairingInProgress = false
+          updateUiFromPrefs()
+          pairButton.isEnabled = true
+        }
+      }
+    }
+  }
+
   private fun formatHostLabel(host: DiscoveredHost): String {
     val name = host.displayName?.trim().orEmpty().ifBlank { host.baseUrl }
     val platform = host.platform?.trim().orEmpty().ifBlank { "host" }
-    return "$name ($platform)\n${host.baseUrl}"
+    val currentHostBaseUrl = AppPrefs.getHostBaseUrl(this).trim()
+    val isCurrent = AppPrefs.isPaired(this) && currentHostBaseUrl.isNotBlank() && host.baseUrl == currentHostBaseUrl
+    val currentTag = if (isCurrent) " ${getString(R.string.host_connected_tag)}" else ""
+    return "$name ($platform)$currentTag\n${host.baseUrl}"
   }
 
   private fun discoverHostCandidates(): List<DiscoveredHost> {
-    return pairingCoordinator.discoverHostsForPair(
+    val discovered = pairingCoordinator.discoverHostsForPair(
       savedBaseUrl = AppPrefs.getHostBaseUrl(this),
       savedPairCode = AppPrefs.getHostPairCode(this),
       isLikelyEmulator = isLikelyEmulator(),
       isLoopbackBaseUrl = ::isLoopbackBaseUrl,
     )
+    return ensureCurrentHostCandidate(discovered)
   }
 
   private fun resolveSelectedHostCandidate(): DiscoveredHost? {
-    val candidates = discoveredHostCandidates
-    if (candidates.isEmpty()) return null
-    val selectedBaseUrl = selectedHostBaseUrl ?: return null
-    return candidates.firstOrNull { it.baseUrl == selectedBaseUrl }
+    val selectedBaseUrl = hostSelectionSnapshot.selectedBaseUrl ?: return null
+    return hostSelectionSnapshot.candidates.firstOrNull { it.baseUrl == selectedBaseUrl }
   }
 
-  private fun syncSelectedHostCandidate() {
-    val candidates = discoveredHostCandidates
-    if (candidates.isEmpty()) {
-      selectedHostBaseUrl = null
-      hostSelectionExplicitlyChosen = false
-      return
-    }
+  private fun ensureCurrentHostCandidate(candidates: List<DiscoveredHost>): List<DiscoveredHost> {
+    val pairedBaseUrl = AppPrefs.getHostBaseUrl(this).trim()
+    if (pairedBaseUrl.isBlank()) return candidates
+    if (candidates.any { it.baseUrl == pairedBaseUrl }) return candidates
 
-    val preservedSelection = selectedHostBaseUrl
-    if (preservedSelection != null && candidates.any { it.baseUrl == preservedSelection } && hostSelectionExplicitlyChosen) {
-      return
-    }
+    val pairedPairCode = AppPrefs.getHostPairCode(this).trim()
+    if (pairedPairCode.isBlank()) return candidates
 
-    if (candidates.size == 1) {
-      selectedHostBaseUrl = candidates.first().baseUrl
-      hostSelectionExplicitlyChosen = false
-      return
-    }
+    val fallback = DiscoveredHost(
+      baseUrl = pairedBaseUrl,
+      pairingCode = pairedPairCode,
+      displayName = getString(R.string.host_current_label),
+      platform = "connected",
+    )
+    return listOf(fallback) + candidates
+  }
 
-    selectedHostBaseUrl = null
-    hostSelectionExplicitlyChosen = false
+  private fun reconcileHostSelectionSnapshot() {
+    val snapshot = HostSelectionState.reconcile(
+      candidates = discoveredHostCandidates,
+      selectedBaseUrl = selectedHostBaseUrl,
+      explicitSelection = hostSelectionExplicitlyChosen,
+      paired = AppPrefs.isPaired(this),
+      pairedBaseUrl = AppPrefs.getHostBaseUrl(this),
+    )
+    hostSelectionSnapshot = snapshot
+    discoveredHostCandidates = snapshot.candidates
+    selectedHostBaseUrl = snapshot.selectedBaseUrl
+    hostSelectionExplicitlyChosen = snapshot.explicitSelection
+  }
+
+  private fun resolvePrimaryHostActionLabel(): String {
+    return when (hostSelectionSnapshot.action) {
+      HostSelectionAction.PAIR -> getString(R.string.pair_button)
+      HostSelectionAction.SWITCH -> getString(R.string.switch_button)
+      HostSelectionAction.UNPAIR -> getString(R.string.unpair_button)
+      HostSelectionAction.SELECT_REQUIRED -> getString(R.string.pair_button)
+    }
   }
 
   private fun updateHostCandidatesUi(paired: Boolean) {
-    if (paired) {
-      hostCandidatesLabel.visibility = View.GONE
-      hostCandidatesGroup.visibility = View.GONE
-      hostCandidatesHintText.visibility = View.GONE
-      return
-    }
-
-    syncSelectedHostCandidate()
+    reconcileHostSelectionSnapshot()
 
     hostCandidatesLabel.visibility = View.VISIBLE
     hostCandidatesHintText.visibility = View.VISIBLE
 
-    val candidates = discoveredHostCandidates
+    val candidates = hostSelectionSnapshot.candidates
     if (candidates.isEmpty()) {
       hostCandidatesGroup.visibility = View.GONE
       hostCandidatesHintText.text = getString(R.string.host_candidates_hint_none)
@@ -424,7 +515,8 @@ class MainActivity : AppCompatActivity() {
     hostCandidatesGroup.visibility = View.VISIBLE
     hostCandidatesHintText.text = when {
       pairingInProgress -> getString(R.string.status_detail_pairing)
-      selectedHostBaseUrl == null -> getString(R.string.host_candidates_hint_select)
+      hostSelectionSnapshot.action == HostSelectionAction.SELECT_REQUIRED -> getString(R.string.host_candidates_hint_select)
+      paired && hostSelectionSnapshot.action == HostSelectionAction.SWITCH -> getString(R.string.host_candidates_hint_switch)
       else -> getString(R.string.host_candidates_hint_ready)
     }
 
@@ -440,7 +532,12 @@ class MainActivity : AppCompatActivity() {
       option.tag = host.baseUrl
       option.text = formatHostLabel(host)
       option.isEnabled = !pairingInProgress
-      option.isChecked = host.baseUrl == selectedHostBaseUrl
+      option.isChecked = host.baseUrl == hostSelectionSnapshot.selectedBaseUrl
+      option.setOnClickListener {
+        selectedHostBaseUrl = host.baseUrl
+        hostSelectionExplicitlyChosen = true
+        updateUiFromPrefs()
+      }
       hostCandidatesGroup.addView(option)
     }
     isUpdatingUi = false
@@ -519,7 +616,7 @@ class MainActivity : AppCompatActivity() {
         runOnUiThread {
           updateUiFromPrefs()
           applyForegroundServiceState()
-          ioExecutor.execute { refreshHostPreviewIfUnpaired() }
+          ioExecutor.execute { refreshHostCandidates() }
         }
       } finally {
         runOnUiThread {
@@ -533,7 +630,8 @@ class MainActivity : AppCompatActivity() {
 
   private fun updateUiFromPrefs() {
     val paired = AppPrefs.isPaired(this)
-    pairButton.text = if (paired) getString(R.string.unpair_button) else getString(R.string.pair_button)
+    updateHostCandidatesUi(paired = paired)
+    pairButton.text = resolvePrimaryHostActionLabel()
     pairButton.isEnabled = !pairingInProgress
     scanQrButton.isEnabled = !pairingInProgress && !paired
     if (!paired && sessionStateMachine.state != SessionState.DISCONNECTED) {
@@ -558,20 +656,20 @@ class MainActivity : AppCompatActivity() {
       pairingInProgress -> getString(R.string.status_detail_pairing)
       !paired -> getString(R.string.status_detail_disconnected)
       degraded -> getString(R.string.status_detail_degraded)
+      paired && hostSelectionSnapshot.action == HostSelectionAction.SWITCH -> getString(R.string.status_detail_switch_ready)
+      paired && hostSelectionSnapshot.action == HostSelectionAction.SELECT_REQUIRED -> getString(R.string.status_detail_select_host)
       else -> getString(R.string.status_detail_paired)
     }
 
     if (!paired) {
-      updateHostCandidatesUi(paired = false)
       hostText.text = resolveUnpairedHostSummary()
       issuesText.text = getString(R.string.issues_none)
-      if (!pairingInProgress && discoveredHostCandidates.size > 1 && selectedHostBaseUrl == null) {
+      if (!pairingInProgress && hostSelectionSnapshot.action == HostSelectionAction.SELECT_REQUIRED) {
         statusDetailText.text = getString(R.string.status_detail_select_host)
       } else if (!pairingInProgress && hasKnownHostCandidate()) {
         statusDetailText.text = getString(R.string.status_detail_discovered_host)
       }
     } else {
-      updateHostCandidatesUi(paired = true)
       val hostBaseUrl = AppPrefs.getHostBaseUrl(this).ifBlank { "unknown host" }
       val phoneName = snapshot?.deviceName ?: localDeviceName
       hostText.text = getString(R.string.host_summary, hostBaseUrl, phoneName)
@@ -780,33 +878,35 @@ class MainActivity : AppCompatActivity() {
     }
     hostStatusTicker = hostStateRefresher.startTicker(ioExecutor) {
         refreshHostStatusIfPaired(applyServiceState = false)
-        refreshHostPreviewIfUnpaired()
+        refreshHostCandidates()
       }
   }
 
-  private fun refreshHostPreviewIfUnpaired() {
-    if (AppPrefs.isPaired(this) || pairingInProgress) {
+  private fun refreshHostCandidates() {
+    if (pairingInProgress) {
       return
     }
     val hosts = discoverHostCandidates()
     discoveredHostCandidates = hosts
     discoveredHostPreview = hosts.firstOrNull()
-    discoveredHostPreview?.let { preview ->
-      try {
-        hostApiClient.publishPresence(
-          baseUrl = preview.baseUrl,
-          deviceName = localDeviceName,
-          deviceId = localDeviceId,
-        )
-      } catch (error: Exception) {
-        Log.w(logTag, "Presence publish failed: ${error.message}")
+    if (!AppPrefs.isPaired(this)) {
+      discoveredHostPreview?.let { preview ->
+        try {
+          hostApiClient.publishPresence(
+            baseUrl = preview.baseUrl,
+            deviceName = localDeviceName,
+            deviceId = localDeviceId,
+          )
+        } catch (error: Exception) {
+          Log.w(logTag, "Presence publish failed: ${error.message}")
+        }
       }
     }
     runOnUiThread { updateUiFromPrefs() }
   }
 
   private fun hasKnownHostCandidate(): Boolean {
-    if (discoveredHostCandidates.isNotEmpty()) return true
+    if (hostSelectionSnapshot.candidates.isNotEmpty()) return true
     val savedBaseUrl = AppPrefs.getHostBaseUrl(this).trim()
     return savedBaseUrl.isNotBlank() && !isLoopbackBaseUrl(savedBaseUrl)
   }
@@ -817,8 +917,8 @@ class MainActivity : AppCompatActivity() {
       return getString(R.string.host_summary_selected, selected.baseUrl)
     }
 
-    if (discoveredHostCandidates.isNotEmpty()) {
-      return getString(R.string.host_summary_discovered_count, discoveredHostCandidates.size)
+    if (hostSelectionSnapshot.candidates.isNotEmpty()) {
+      return getString(R.string.host_summary_discovered_count, hostSelectionSnapshot.candidates.size)
     }
 
     val savedBaseUrl = AppPrefs.getHostBaseUrl(this).trim()

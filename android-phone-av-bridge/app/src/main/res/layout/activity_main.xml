@@ -80,7 +80,7 @@
                     android:id="@+id/hostCandidatesHintText"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="4dp"
+                    android:layout_marginTop="6dp"
                     android:text="@string/host_candidates_hint_none"
                     android:textAppearance="@style/TextAppearance.Material3.BodySmall" />
 

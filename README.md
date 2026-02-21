@@ -107,7 +107,7 @@ curl -s http://127.0.0.1:8787/health
 curl -s http://127.0.0.1:8787/api/bootstrap | jq '.bootstrap.baseUrl,.bootstrap.pairingCode'
 ```
 
-4. In Android `Pair Host`, if a host picker appears, select the entry whose URL matches `<LAN_IP>:8787`.
+4. In Android host list, select the entry whose URL matches `<LAN_IP>:8787`, then tap `Pair` (or `Switch` if already paired).
 
 5. Only use loopback advertise mode for USB-reverse debugging:
 
@@ -169,7 +169,7 @@ Notes:
 2. Install `PhoneAVBridgeCamera.app` into `/Applications` and launch it.
 3. `Phone AV Bridge Camera` auto-starts `Phone AV Bridge Host` in the background (when installed), and shows host bridge status in-app.
 4. Install Android APK and open `Phone AV Bridge`.
-5. In Android app, either tap `Pair Host` (LAN discovery + host selection) or `Scan QR Pairing` (explicit host via QR token).
+5. In Android app, select a host from the visible host list and tap `Pair`; while already paired, select another host and tap `Switch`; or use `Scan QR Pairing` for explicit QR pairing.
 6. Enable `Camera` and/or `Microphone` on phone.
 7. If camera is enabled, choose `Front` or `Back` lens on phone.
 8. In Zoom/meeting app on macOS:

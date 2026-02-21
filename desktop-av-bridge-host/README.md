@@ -136,10 +136,11 @@ tail -n 120 ~/.local/state/phone-av-bridge-host/phone-av-bridge-host.log
 
 - App shows explicit host status and status detail (`Not paired`, `Pairing`, `Paired and ready`, `Paired with host sync issue`).
 - App shows host summary and active issues returned by host status API.
-- While unpaired, Android now shows discovered host preview (`Host discovered: ...`) before user taps Pair.
-- `Pair Host` now uses explicit pairing behavior:
-  - 1 discovered host: quick pair after explicit tap,
-  - multiple discovered hosts: Android shows host picker and user selects target host.
+- Android now keeps a visible host list in both unpaired and paired states (not only in a pairing popup).
+- Primary action is selection-aware:
+  - unpaired + selected host -> `Pair`,
+  - paired + selected current host -> `Unpair`,
+  - paired + selected different host -> `Switch` (auto-unpair current host, then pair selected host).
 - Android also supports explicit QR path (`Scan QR Pairing`) by scanning host-generated QR payload and redeeming one-time token.
 - Host keeps last-seen/nearby phone identity in status while unpaired, so macOS host UI can show the phone before pair completion.
 - Pairing failures are categorized into:

@@ -71,6 +71,23 @@ class PairingCoordinator(
     return PairHostResult(host = host, snapshot = snapshot)
   }
 
+  fun switchHost(
+    currentBaseUrl: String,
+    targetHost: DiscoveredHost,
+    deviceName: String,
+    deviceId: String,
+  ): PairHostResult {
+    val current = currentBaseUrl.trim()
+    if (current.isNotBlank() && current != targetHost.baseUrl) {
+      try {
+        unpairHost(current)
+      } catch (_: Exception) {
+        // Best effort old-host cleanup before pairing target host.
+      }
+    }
+    return pairHost(targetHost, deviceName, deviceId)
+  }
+
   fun unpairHost(hostBaseUrl: String) {
     if (hostBaseUrl.isBlank()) return
     hostApiClient.unpair(hostBaseUrl)
