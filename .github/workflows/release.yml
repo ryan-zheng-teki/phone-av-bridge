@@ -56,6 +56,42 @@ jobs:
             RELEASE_ANDROID="${{ inputs.release_android }}"
             RELEASE_MACOS="${{ inputs.release_macos }}"
             RELEASE_LINUX_DEB="${{ inputs.release_linux_deb }}"
+          else
+            if [[ "${TAG}" == *"+targets="* ]]; then
+              TARGETS="${TAG#*+targets=}"
+              if [[ -z "${TARGETS}" ]]; then
+                echo "Tag target selector is empty. Use +targets=android,linux,macos." >&2
+                exit 1
+              fi
+              RELEASE_ANDROID="false"
+              RELEASE_MACOS="false"
+              RELEASE_LINUX_DEB="false"
+              IFS=',' read -r -a TARGET_LIST <<< "${TARGETS}"
+              for raw_target in "${TARGET_LIST[@]}"; do
+                target="$(echo "${raw_target}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+                case "${target}" in
+                  android)
+                    RELEASE_ANDROID="true"
+                    ;;
+                  macos|mac)
+                    RELEASE_MACOS="true"
+                    ;;
+                  linux|linux-deb|debian|deb)
+                    RELEASE_LINUX_DEB="true"
+                    ;;
+                  all)
+                    RELEASE_ANDROID="true"
+                    RELEASE_MACOS="true"
+                    RELEASE_LINUX_DEB="true"
+                    ;;
+                  *)
+                    echo "Unsupported target selector '${target}' in tag '${TAG}'." >&2
+                    echo "Supported values: android, macos, linux, all." >&2
+                    exit 1
+                    ;;
+                esac
+              done
+            fi
           fi
           if [[ -z "${TAG}" ]]; then
             echo "Release tag is required." >&2
@@ -66,6 +102,7 @@ jobs:
             exit 1
           fi
           VERSION="${TAG#v}"
+          VERSION="${VERSION%%+targets=*}"
           if [[ -z "${VERSION}" ]]; then
             echo "Version cannot be empty." >&2
             exit 1
