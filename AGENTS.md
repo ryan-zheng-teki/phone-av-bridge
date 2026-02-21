@@ -65,3 +65,8 @@ open "$HOME/Applications/PhoneAVBridgeCamera.app"
 ```bash
 ps -ax -o pid,etime,args | rg 'PhoneAVBridgeCamera.app/Contents/MacOS/PhoneAVBridgeCamera' | rg -v rg
 ```
+
+## Release Workflow
+
+- For release process and selective target publishing rules, read `README.md` section `Tag-Based GitHub Releases`.
+- Do not invent alternate release steps in agent responses; follow the README-defined workflow.

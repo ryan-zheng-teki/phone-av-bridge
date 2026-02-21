@@ -204,11 +204,33 @@ This repository includes a release workflow at:
 
 - `.github/workflows/release.yml`
 
-Trigger a release by pushing a tag:
+Release can be triggered in two ways:
+
+1. `workflow_dispatch` (manual run in GitHub Actions) with inputs:
+   - `tag` (example: `v0.1.11`)
+   - `release_android` (`true|false`)
+   - `release_macos` (`true|false`)
+   - `release_linux_deb` (`true|false`)
+
+2. Push a tag:
+   - default behavior: all targets
+   - selective behavior: `v<version>+targets=<csv>`
+     - supported selectors: `android`, `linux`, `macos`, `all`
+
+Examples:
 
 ```bash
-git tag v0.1.8
-git push origin v0.1.8
+# all targets
+git tag -a "v0.1.11" -m "Release v0.1.11"
+git push origin "v0.1.11"
+
+# android + linux deb only
+git tag -a "v0.1.12+targets=android,linux" -m "Release v0.1.12 (android + linux)"
+git push origin "v0.1.12+targets=android,linux"
+
+# macOS only
+git tag -a "v0.1.13+targets=macos" -m "Release v0.1.13 (macos)"
+git push origin "v0.1.13+targets=macos"
 ```
 
 Published release assets:
@@ -217,6 +239,11 @@ Published release assets:
 - macOS camera app archive (`PhoneAVBridgeCamera` unsigned zip)
 - Linux Debian package (`phone-av-bridge-host_<version>_<arch>.deb`)
 - `SHA256SUMS.txt`
+
+Notes:
+
+- At least one target must be enabled for manual `workflow_dispatch`.
+- For `+targets=...` tags, release artifact filenames use the normalized version without the selector suffix.
 
 ## End-User Installation Guides
 
