@@ -74,8 +74,8 @@ async function buildDeb() {
     'Priority: optional',
     `Architecture: ${arch}`,
     'Maintainer: AutoByteus <support@autobyteus.com>',
-    'Depends: bash',
-    'Recommends: ffmpeg, pulseaudio-utils, v4l2loopback-dkms',
+    'Depends: bash, ffmpeg, pulseaudio-utils, v4l2loopback-dkms',
+    'Recommends: v4l2loopback-utils',
     'Description: AutoByteus Phone AV Bridge Host',
     ' Exposes Android phone camera/microphone/speaker as host virtual devices.',
     ' Includes Linux host UI at http://127.0.0.1:8787 after launch.',
@@ -90,27 +90,81 @@ VIDEO_NR="\${V4L2_VIDEO_NR:-2}"
 CARD_LABEL="\${V4L2_CARD_LABEL:-AutoByteusPhoneCamera}"
 MODPROBE_CONF="/etc/modprobe.d/phone-av-bridge-v4l2loopback.conf"
 MODULES_LOAD_CONF="/etc/modules-load.d/phone-av-bridge-v4l2loopback.conf"
+DEFAULTS_FILE="/etc/default/phone-av-bridge-host"
 
 mkdir -p /etc/modprobe.d /etc/modules-load.d
 printf 'options v4l2loopback video_nr=%s card_label=%s exclusive_caps=0 max_buffers=2\\n' "\${VIDEO_NR}" "\${CARD_LABEL}" > "\${MODPROBE_CONF}" || true
 printf 'v4l2loopback\\n' > "\${MODULES_LOAD_CONF}" || true
+
+if [[ ! -f "\${DEFAULTS_FILE}" ]]; then
+  cat > "\${DEFAULTS_FILE}" <<'DEFAULTS'
+# Phone AV Bridge host defaults (optional overrides)
+LINUX_CAMERA_MODE=compatibility
+V4L2_DEVICE=/dev/video2
+# Optional: pin speaker capture source instead of automatic safe selection.
+# LINUX_SPEAKER_CAPTURE_SOURCE=alsa_output.pci-0000_00_1f.3.analog-stereo.monitor
+DEFAULTS
+fi
 
 if command -v modprobe >/dev/null 2>&1; then
   modprobe -r v4l2loopback || true
   modprobe v4l2loopback video_nr="\${VIDEO_NR}" card_label="\${CARD_LABEL}" exclusive_caps=0 max_buffers=2 || true
 fi
 `;
+  const prermScript = `#!/usr/bin/env bash
+set -euo pipefail
+
+TARGET_DIR="/opt/phone-av-bridge-host"
+
+kill_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "\${pid}" 2>/dev/null || true); do
+    kill_tree "\${child}"
+  done
+  kill "\${pid}" >/dev/null 2>&1 || true
+}
+
+for host_pid in $(pgrep -f "\${TARGET_DIR}/desktop-app/server.mjs" 2>/dev/null || true); do
+  kill_tree "\${host_pid}"
+done
+
+for bridge_pid in $(pgrep -f "\${TARGET_DIR}/phone-av-camera-bridge-runtime/bin/run-bridge.sh" 2>/dev/null || true); do
+  kill_tree "\${bridge_pid}"
+done
+
+for mic_pid in $(pgrep -f 'ffmpeg .* -f pulse phone_av_bridge_mic_sink_' 2>/dev/null || true); do
+  kill "\${mic_pid}" >/dev/null 2>&1 || true
+done
+
+if command -v pactl >/dev/null 2>&1; then
+  { pactl list short modules 2>/dev/null || true; } | awk -F'\\t' '/phone_av_bridge_mic_sink_|phone_av_bridge_mic_input_/ {print $1}' | while read -r module_id; do
+    if [[ -n "\${module_id}" ]]; then
+      pactl unload-module "\${module_id}" >/dev/null 2>&1 || true
+    fi
+  done
+fi
+`;
   const postrmScript = `#!/usr/bin/env bash
 set -euo pipefail
+
+if [[ "\${1:-}" == "remove" || "\${1:-}" == "purge" ]]; then
+  if command -v modprobe >/dev/null 2>&1; then
+    modprobe -r v4l2loopback >/dev/null 2>&1 || true
+  fi
+fi
 
 if [[ "\${1:-}" == "purge" ]]; then
   rm -f /etc/modules-load.d/phone-av-bridge-v4l2loopback.conf || true
   rm -f /etc/modprobe.d/phone-av-bridge-v4l2loopback.conf || true
+  rm -f /etc/default/phone-av-bridge-host || true
 fi
 `;
   await fs.writeFile(path.join(debianDir, 'postinst'), postinstScript, 'utf8');
+  await fs.writeFile(path.join(debianDir, 'prerm'), prermScript, 'utf8');
   await fs.writeFile(path.join(debianDir, 'postrm'), postrmScript, 'utf8');
   await ensureExecutable(path.join(debianDir, 'postinst'));
+  await ensureExecutable(path.join(debianDir, 'prerm'));
   await ensureExecutable(path.join(debianDir, 'postrm'));
 
   const startScript = `#!/usr/bin/env bash

@@ -29,6 +29,13 @@ phone-av-bridge-host-start
 curl -s http://127.0.0.1:8787/health
 ```
 
+Clean reset (remove package + auto-installed deps, then reinstall):
+
+```bash
+sudo apt purge -y phone-av-bridge-host v4l2loopback-dkms v4l2loopback-utils
+sudo apt install -y "./phone-av-bridge-host_${VERSION}_amd64.deb"
+```
+
 If startup fails:
 
 ```bash

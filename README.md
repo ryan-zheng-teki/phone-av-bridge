@@ -319,7 +319,7 @@ phone-av-bridge-host-stop
 Uninstall host:
 
 ```bash
-sudo apt remove -y phone-av-bridge-host
+sudo apt purge -y phone-av-bridge-host v4l2loopback-dkms v4l2loopback-utils
 ```
 
 Optional Android signing secrets (GitHub repository secrets):

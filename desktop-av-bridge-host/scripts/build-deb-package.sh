@@ -295,8 +295,8 @@ Section: video
 Priority: optional
 Architecture: ${ARCH}
 Maintainer: Phone AV Bridge Maintainers <noreply@users.noreply.github.com>
-Depends: ffmpeg, pulseaudio-utils
-Recommends: v4l2loopback-dkms, v4l2loopback-utils
+Depends: ffmpeg, pulseaudio-utils, v4l2loopback-dkms
+Recommends: v4l2loopback-utils
 Installed-Size: ${INSTALLED_SIZE}
 Description: Phone AV Bridge desktop host
  Linux and macOS host orchestrator for phone camera, microphone, and speaker bridging.
@@ -333,17 +333,60 @@ if command -v modprobe >/dev/null 2>&1; then
 fi
 POSTINST
 
+cat > "${DEBIAN_DIR}/prerm" <<'PRERM'
+#!/usr/bin/env bash
+set -euo pipefail
+
+TARGET_DIR="/opt/phone-av-bridge-host"
+
+kill_tree() {
+  local pid="$1"
+  local child
+  for child in $(pgrep -P "${pid}" 2>/dev/null || true); do
+    kill_tree "${child}"
+  done
+  kill "${pid}" >/dev/null 2>&1 || true
+}
+
+for host_pid in $(pgrep -f "${TARGET_DIR}/desktop-app/server.mjs" 2>/dev/null || true); do
+  kill_tree "${host_pid}"
+done
+
+for bridge_pid in $(pgrep -f "${TARGET_DIR}/phone-av-camera-bridge-runtime/bin/run-bridge.sh" 2>/dev/null || true); do
+  kill_tree "${bridge_pid}"
+done
+
+for mic_pid in $(pgrep -f 'ffmpeg .* -f pulse phone_av_bridge_mic_sink_' 2>/dev/null || true); do
+  kill "${mic_pid}" >/dev/null 2>&1 || true
+done
+
+if command -v pactl >/dev/null 2>&1; then
+  { pactl list short modules 2>/dev/null || true; } | awk -F'\t' '/phone_av_bridge_mic_sink_|phone_av_bridge_mic_input_/ {print $1}' | while read -r module_id; do
+    if [[ -n "${module_id}" ]]; then
+      pactl unload-module "${module_id}" >/dev/null 2>&1 || true
+    fi
+  done
+fi
+PRERM
+
 cat > "${DEBIAN_DIR}/postrm" <<'POSTRM'
 #!/usr/bin/env bash
 set -euo pipefail
 
+if [[ "${1:-}" == "remove" || "${1:-}" == "purge" ]]; then
+  if command -v modprobe >/dev/null 2>&1; then
+    modprobe -r v4l2loopback >/dev/null 2>&1 || true
+  fi
+fi
+
 if [[ "${1:-}" == "purge" ]]; then
   rm -f /etc/modules-load.d/phone-av-bridge-v4l2loopback.conf || true
   rm -f /etc/modprobe.d/phone-av-bridge-v4l2loopback.conf || true
+  rm -f /etc/default/phone-av-bridge-host || true
 fi
 POSTRM
 
-chmod 0755 "${DEBIAN_DIR}/postinst" "${DEBIAN_DIR}/postrm"
+chmod 0755 "${DEBIAN_DIR}/postinst" "${DEBIAN_DIR}/prerm" "${DEBIAN_DIR}/postrm"
 
 DEB_NAME="${PACKAGE_NAME}_${VERSION}_${ARCH}.deb"
 DEB_PATH="${DIST_DIR}/${DEB_NAME}"
