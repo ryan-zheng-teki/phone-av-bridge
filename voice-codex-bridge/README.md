@@ -23,6 +23,14 @@ Default in this MVP: `tiny.en` (fast startup and low latency).
 
 ```bash
 cd voice-codex-bridge
+./install.sh
+./voice-codex -h
+```
+
+`voice-codex` now auto-creates `./.venv` and installs missing Python dependencies on first run.
+Manual setup is still supported:
+
+```bash
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
