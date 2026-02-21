@@ -6,11 +6,12 @@ import android.os.Bundle
 import android.os.Build
 import android.util.Log
 import android.widget.Button
+import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.TextView
 import android.widget.Toast
+import android.view.View
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.content.ContextCompat
 import com.journeyapps.barcodescanner.ScanContract
@@ -42,6 +43,9 @@ class MainActivity : AppCompatActivity() {
   private lateinit var statusText: TextView
   private lateinit var statusDetailText: TextView
   private lateinit var hostText: TextView
+  private lateinit var hostCandidatesLabel: TextView
+  private lateinit var hostCandidatesGroup: RadioGroup
+  private lateinit var hostCandidatesHintText: TextView
   private lateinit var issuesText: TextView
   private lateinit var pairButton: Button
   private lateinit var scanQrButton: Button
@@ -68,6 +72,8 @@ class MainActivity : AppCompatActivity() {
   @Volatile private var lastHostStatusError: String? = null
   @Volatile private var discoveredHostPreview: DiscoveredHost? = null
   @Volatile private var discoveredHostCandidates: List<DiscoveredHost> = emptyList()
+  @Volatile private var selectedHostBaseUrl: String? = null
+  @Volatile private var hostSelectionExplicitlyChosen = false
   private val localDeviceName by lazy { DeviceIdentityResolver.resolveDeviceName(this) }
   private val localDeviceId by lazy { DeviceIdentityResolver.resolveDeviceId(this) }
 
@@ -101,6 +107,9 @@ class MainActivity : AppCompatActivity() {
     statusText = findViewById(R.id.statusText)
     statusDetailText = findViewById(R.id.statusDetailText)
     hostText = findViewById(R.id.hostText)
+    hostCandidatesLabel = findViewById(R.id.hostCandidatesLabel)
+    hostCandidatesGroup = findViewById(R.id.hostCandidatesGroup)
+    hostCandidatesHintText = findViewById(R.id.hostCandidatesHintText)
     issuesText = findViewById(R.id.issuesText)
     pairButton = findViewById(R.id.pairButton)
     scanQrButton = findViewById(R.id.scanQrButton)
@@ -155,6 +164,14 @@ class MainActivity : AppCompatActivity() {
         return@setOnClickListener
       }
       launchQrScan()
+    }
+
+    hostCandidatesGroup.setOnCheckedChangeListener { group, checkedId ->
+      if (isUpdatingUi || checkedId == -1) return@setOnCheckedChangeListener
+      val selectedButton = group.findViewById<RadioButton>(checkedId) ?: return@setOnCheckedChangeListener
+      selectedHostBaseUrl = selectedButton.tag as? String
+      hostSelectionExplicitlyChosen = selectedHostBaseUrl != null
+      updateUiFromPrefs()
     }
 
     cameraSwitch.setOnCheckedChangeListener { _, enabled ->
@@ -297,18 +314,19 @@ class MainActivity : AppCompatActivity() {
   }
 
   private fun beginPairSelectionFlow() {
+    resolveSelectedHostCandidate()?.let { selected ->
+      pairHost(selected)
+      return
+    }
+
     pairingInProgress = true
     updateUiFromPrefs()
     pairButton.isEnabled = false
 
     ioExecutor.execute {
       try {
-        val hosts = pairingCoordinator.discoverHostsForPair(
-          savedBaseUrl = AppPrefs.getHostBaseUrl(this),
-          savedPairCode = AppPrefs.getHostPairCode(this),
-          isLikelyEmulator = isLikelyEmulator(),
-          isLoopbackBaseUrl = ::isLoopbackBaseUrl,
-        )
+        val hosts = discoverHostCandidates()
+        discoveredHostPreview = hosts.firstOrNull()
         discoveredHostCandidates = hosts
         runOnUiThread {
           pairingInProgress = false
@@ -318,11 +336,11 @@ class MainActivity : AppCompatActivity() {
             hosts.isEmpty() -> {
               Toast.makeText(this, getString(R.string.pair_failed_discovery), Toast.LENGTH_LONG).show()
             }
-            hosts.size == 1 -> {
-              pairHost(hosts[0])
+            hosts.size > 1 && selectedHostBaseUrl == null -> {
+              Toast.makeText(this, getString(R.string.pair_select_host_first), Toast.LENGTH_SHORT).show()
             }
             else -> {
-              showHostSelectionDialog(hosts)
+              resolveSelectedHostCandidate()?.let(::pairHost)
             }
           }
         }
@@ -338,29 +356,94 @@ class MainActivity : AppCompatActivity() {
     }
   }
 
-  private fun showHostSelectionDialog(hosts: List<DiscoveredHost>) {
-    val labels = hosts.map { formatHostLabel(it) }.toTypedArray()
-    var selectedIndex = hosts.indexOfFirst { it.baseUrl == discoveredHostPreview?.baseUrl }
-    if (selectedIndex < 0) {
-      selectedIndex = 0
-    }
-
-    AlertDialog.Builder(this)
-      .setTitle(R.string.select_host_title)
-      .setSingleChoiceItems(labels, selectedIndex) { _, which ->
-        selectedIndex = which
-      }
-      .setPositiveButton(R.string.select_host_confirm_button) { _, _ ->
-        pairHost(hosts[selectedIndex])
-      }
-      .setNegativeButton(android.R.string.cancel, null)
-      .show()
-  }
-
   private fun formatHostLabel(host: DiscoveredHost): String {
     val name = host.displayName?.trim().orEmpty().ifBlank { host.baseUrl }
     val platform = host.platform?.trim().orEmpty().ifBlank { "host" }
     return "$name ($platform)\n${host.baseUrl}"
+  }
+
+  private fun discoverHostCandidates(): List<DiscoveredHost> {
+    return pairingCoordinator.discoverHostsForPair(
+      savedBaseUrl = AppPrefs.getHostBaseUrl(this),
+      savedPairCode = AppPrefs.getHostPairCode(this),
+      isLikelyEmulator = isLikelyEmulator(),
+      isLoopbackBaseUrl = ::isLoopbackBaseUrl,
+    )
+  }
+
+  private fun resolveSelectedHostCandidate(): DiscoveredHost? {
+    val candidates = discoveredHostCandidates
+    if (candidates.isEmpty()) return null
+    val selectedBaseUrl = selectedHostBaseUrl ?: return null
+    return candidates.firstOrNull { it.baseUrl == selectedBaseUrl }
+  }
+
+  private fun syncSelectedHostCandidate() {
+    val candidates = discoveredHostCandidates
+    if (candidates.isEmpty()) {
+      selectedHostBaseUrl = null
+      hostSelectionExplicitlyChosen = false
+      return
+    }
+
+    val preservedSelection = selectedHostBaseUrl
+    if (preservedSelection != null && candidates.any { it.baseUrl == preservedSelection } && hostSelectionExplicitlyChosen) {
+      return
+    }
+
+    if (candidates.size == 1) {
+      selectedHostBaseUrl = candidates.first().baseUrl
+      hostSelectionExplicitlyChosen = false
+      return
+    }
+
+    selectedHostBaseUrl = null
+    hostSelectionExplicitlyChosen = false
+  }
+
+  private fun updateHostCandidatesUi(paired: Boolean) {
+    if (paired) {
+      hostCandidatesLabel.visibility = View.GONE
+      hostCandidatesGroup.visibility = View.GONE
+      hostCandidatesHintText.visibility = View.GONE
+      return
+    }
+
+    syncSelectedHostCandidate()
+
+    hostCandidatesLabel.visibility = View.VISIBLE
+    hostCandidatesHintText.visibility = View.VISIBLE
+
+    val candidates = discoveredHostCandidates
+    if (candidates.isEmpty()) {
+      hostCandidatesGroup.visibility = View.GONE
+      hostCandidatesHintText.text = getString(R.string.host_candidates_hint_none)
+      return
+    }
+
+    hostCandidatesGroup.visibility = View.VISIBLE
+    hostCandidatesHintText.text = when {
+      pairingInProgress -> getString(R.string.status_detail_pairing)
+      selectedHostBaseUrl == null -> getString(R.string.host_candidates_hint_select)
+      else -> getString(R.string.host_candidates_hint_ready)
+    }
+
+    isUpdatingUi = true
+    hostCandidatesGroup.removeAllViews()
+    candidates.forEach { host ->
+      val option = RadioButton(this)
+      option.id = View.generateViewId()
+      option.layoutParams = RadioGroup.LayoutParams(
+        RadioGroup.LayoutParams.MATCH_PARENT,
+        RadioGroup.LayoutParams.WRAP_CONTENT,
+      )
+      option.tag = host.baseUrl
+      option.text = formatHostLabel(host)
+      option.isEnabled = !pairingInProgress
+      option.isChecked = host.baseUrl == selectedHostBaseUrl
+      hostCandidatesGroup.addView(option)
+    }
+    isUpdatingUi = false
   }
 
   private fun pairHost(host: DiscoveredHost) {
@@ -479,12 +562,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     if (!paired) {
+      updateHostCandidatesUi(paired = false)
       hostText.text = resolveUnpairedHostSummary()
       issuesText.text = getString(R.string.issues_none)
-      if (!pairingInProgress && hasKnownHostCandidate()) {
+      if (!pairingInProgress && discoveredHostCandidates.size > 1 && selectedHostBaseUrl == null) {
+        statusDetailText.text = getString(R.string.status_detail_select_host)
+      } else if (!pairingInProgress && hasKnownHostCandidate()) {
         statusDetailText.text = getString(R.string.status_detail_discovered_host)
       }
     } else {
+      updateHostCandidatesUi(paired = true)
       val hostBaseUrl = AppPrefs.getHostBaseUrl(this).ifBlank { "unknown host" }
       val phoneName = snapshot?.deviceName ?: localDeviceName
       hostText.text = getString(R.string.host_summary, hostBaseUrl, phoneName)
@@ -701,10 +788,10 @@ class MainActivity : AppCompatActivity() {
     if (AppPrefs.isPaired(this) || pairingInProgress) {
       return
     }
-    val preview = discoverHostPreview()
-    discoveredHostPreview = preview
-    discoveredHostCandidates = preview?.let { listOf(it) } ?: emptyList()
-    if (preview != null) {
+    val hosts = discoverHostCandidates()
+    discoveredHostCandidates = hosts
+    discoveredHostPreview = hosts.firstOrNull()
+    discoveredHostPreview?.let { preview ->
       try {
         hostApiClient.publishPresence(
           baseUrl = preview.baseUrl,
@@ -718,25 +805,22 @@ class MainActivity : AppCompatActivity() {
     runOnUiThread { updateUiFromPrefs() }
   }
 
-  private fun discoverHostPreview(): DiscoveredHost? {
-    return hostStateRefresher.discoverHostPreview(
-      savedBaseUrl = AppPrefs.getHostBaseUrl(this),
-      savedPairCode = AppPrefs.getHostPairCode(this),
-      isLikelyEmulator = isLikelyEmulator(),
-      isLoopbackBaseUrl = ::isLoopbackBaseUrl,
-    )
-  }
-
   private fun hasKnownHostCandidate(): Boolean {
-    if (discoveredHostPreview != null) return true
+    if (discoveredHostCandidates.isNotEmpty()) return true
     val savedBaseUrl = AppPrefs.getHostBaseUrl(this).trim()
     return savedBaseUrl.isNotBlank() && !isLoopbackBaseUrl(savedBaseUrl)
   }
 
   private fun resolveUnpairedHostSummary(): String {
-    discoveredHostPreview?.let { host ->
-      return getString(R.string.host_summary_discovered, host.baseUrl)
+    val selected = resolveSelectedHostCandidate()
+    if (selected != null) {
+      return getString(R.string.host_summary_selected, selected.baseUrl)
     }
+
+    if (discoveredHostCandidates.isNotEmpty()) {
+      return getString(R.string.host_summary_discovered_count, discoveredHostCandidates.size)
+    }
+
     val savedBaseUrl = AppPrefs.getHostBaseUrl(this).trim()
     if (savedBaseUrl.isNotBlank() && !isLoopbackBaseUrl(savedBaseUrl)) {
       return getString(R.string.host_summary_saved, savedBaseUrl)
