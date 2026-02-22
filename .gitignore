@@ -71,3 +71,6 @@ tmp_cameraextension_baseline/
 voice-codex-bridge/.venv/
 **/__pycache__/
 *.pyc
+
+# Local secrets (never commit)
+.secrets/
