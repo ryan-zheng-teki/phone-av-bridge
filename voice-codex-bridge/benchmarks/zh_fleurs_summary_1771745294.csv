@@ -1,0 +1,4 @@
+model,load_sec,samples,avg_cer,median_cer,exact_match_rate,total_decode_sec,total_audio_sec,rtf,avg_decode_sec
+tiny,24.133,12,0.396,0.3949,0.0,5.42,140.46,0.039,0.452
+base,50.46,12,0.3689,0.3623,0.0,9.276,140.46,0.066,0.773
+small,159.303,12,0.214,0.2333,0.0,26.637,140.46,0.19,2.22
