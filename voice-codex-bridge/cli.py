@@ -16,8 +16,8 @@ from dataclasses import dataclass
 from typing import Optional
 
 
-DEFAULT_MODEL = os.environ.get("STT_MODEL", "tiny.en")
-DEFAULT_LANGUAGE = os.environ.get("STT_LANGUAGE", "en")
+DEFAULT_LANGUAGE = (os.environ.get("STT_LANGUAGE") or os.environ.get("LANG_CODE") or "zh").strip()
+DEFAULT_MODEL = os.environ.get("STT_MODEL", "small")
 DEFAULT_DEVICE = os.environ.get("STT_DEVICE", "cpu")
 DEFAULT_COMPUTE_TYPE = os.environ.get("STT_COMPUTE_TYPE", "int8")
 DEFAULT_CODEX_CMD = os.environ.get("CODEX_CMD", "codex")
@@ -105,6 +105,32 @@ def compose_codex_command(command: str, extra_args: list[str]) -> str:
     return f"{base} {shlex.join(remainder)}"
 
 
+def normalize_stt_language(language: str) -> str:
+    value = (language or "").strip()
+    if not value:
+        return "zh"
+    lowered = value.lower().replace("_", "-")
+    if lowered in {"zh", "zh-cn", "zh-hans", "cmn-hans-cn"}:
+        return "zh"
+    return value
+
+
+def resolve_stt_profile(language: str, model: str) -> tuple[str, str, Optional[str]]:
+    resolved_language = normalize_stt_language(language)
+    resolved_model = (model or "").strip() or DEFAULT_MODEL
+    notice: Optional[str] = None
+
+    # `.en` Whisper checkpoints are English-only; force multilingual model for Chinese.
+    if resolved_language.lower().startswith("zh") and resolved_model.lower().endswith(".en"):
+        notice = (
+            f"stt model '{resolved_model}' is English-only for language "
+            f"'{resolved_language}'; switching to 'small'."
+        )
+        resolved_model = "small"
+
+    return resolved_language, resolved_model, notice
+
+
 @dataclass
 class RecorderState:
     process: Optional[subprocess.Popen] = None
@@ -185,6 +211,7 @@ class VoiceCodexCliBridge:
         self._old_term = None
         self._stdin_pending = bytearray()
         self._transcript_draft = ""
+        self._status_message = ""
 
     def run(self) -> int:
         self._ensure_prereqs()
@@ -214,6 +241,7 @@ class VoiceCodexCliBridge:
                     elif fd == self._stdin_fd:
                         self._handle_stdin_bytes()
         finally:
+            self._clear_status()
             self._restore_stdin()
             self._stop_recorder_if_running()
             self._stop_codex()
@@ -474,8 +502,8 @@ class VoiceCodexCliBridge:
         if not text:
             self._print_status("no speech detected.")
             return
-        appended = self._append_transcript_draft(text)
-        self._print_status(f"transcript draft: {appended}")
+        self._append_transcript_draft(text)
+        self._print_status("transcript updated.")
 
         if self.auto_send and self._master_fd is not None:
             os.write(self._master_fd, (text + " ").encode("utf-8", errors="ignore"))
@@ -492,8 +520,35 @@ class VoiceCodexCliBridge:
         return self._transcript_draft
 
     def _print_status(self, message: str) -> None:
-        sys.stdout.write(f"\r\n[voice-codex] {message}\r\n")
-        sys.stdout.flush()
+        text = f"[voice-codex] {message}".replace("\r", " ").replace("\n", " ")
+        self._status_message = text
+        self._render_status_overlay(text)
+
+    def _clear_status(self) -> None:
+        self._status_message = ""
+        self._render_status_overlay("")
+
+    def _render_status_overlay(self, text: str) -> None:
+        if not sys.stdout.isatty():
+            if text:
+                sys.stdout.write(f"\r\n{text}\r\n")
+                sys.stdout.flush()
+            return
+        try:
+            cols, rows = shutil.get_terminal_size(fallback=(120, 30))
+            clipped = text[: max(0, cols - 1)]
+            payload = (
+                "\x1b7"
+                f"\x1b[{rows};1H"
+                "\x1b[2K"
+                f"{clipped}"
+                "\x1b8"
+            )
+            os.write(sys.stdout.fileno(), payload.encode("utf-8", errors="ignore"))
+        except Exception:
+            if text:
+                sys.stdout.write(f"\r\n{text}\r\n")
+                sys.stdout.flush()
 
 
 def parse_args():
@@ -503,6 +558,7 @@ def parse_args():
     )
     parser.add_argument("--command", default=DEFAULT_CODEX_CMD, help="Command used to start Codex.")
     parser.add_argument("--stt-language", dest="language", default=DEFAULT_LANGUAGE, help="STT language code.")
+    parser.add_argument("--lang-code", dest="language", default=argparse.SUPPRESS, help="Alias for --stt-language.")
     parser.add_argument("--stt-model", dest="model", default=DEFAULT_MODEL, help="STT model name (for faster-whisper).")
     parser.add_argument("--stt-device", dest="device", default=DEFAULT_DEVICE, help="STT device (cpu|auto|cuda).")
     parser.add_argument("--stt-compute-type", dest="compute_type", default=DEFAULT_COMPUTE_TYPE, help="STT compute type.")
@@ -530,14 +586,17 @@ def is_help_request(args: list[str]) -> bool:
 
 def main() -> int:
     args = parse_args()
+    language, model, stt_notice = resolve_stt_profile(language=args.language, model=args.model)
+    if stt_notice:
+        sys.stderr.write(f"[voice-codex] {stt_notice}\n")
     codex_command = compose_codex_command(args.command, args.codex_args)
     if is_help_request(args.codex_args):
         result = subprocess.run(["bash", "-lc", codex_command], check=False)
         return result.returncode
     bridge = VoiceCodexCliBridge(
         codex_command=codex_command,
-        language=args.language,
-        model=args.model,
+        language=language,
+        model=model,
         device=args.device,
         compute_type=args.compute_type,
         record_source=args.record_source,

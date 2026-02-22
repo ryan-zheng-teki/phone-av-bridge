@@ -17,7 +17,7 @@ This app launches Codex in its own PTY so text injection is deterministic (much 
 - Vosk offline models (very small footprints, lower quality for general dictation).
   - Source: https://alphacephei.com/vosk/models
 
-Default in this MVP: `tiny.en` (fast startup and low latency).
+Default in this MVP: `small` + `zh` (better Mandarin recognition with acceptable local latency).
 
 ## Quick start (CLI only)
 
@@ -28,6 +28,7 @@ cd voice-codex-bridge
 ```
 
 `voice-codex` now auto-creates `./.venv` and installs missing Python dependencies on first run.
+`./install.sh` also creates `./.voice-codex.env` on first run with defaults `STT_MODEL=small` and `STT_LANGUAGE=zh`.
 Manual setup is still supported:
 
 ```bash
@@ -79,7 +80,7 @@ Optional flags:
 - `--record-key ctrl-x` (default) or `--record-key ctrl-r` for keyboard chord hotkeys.
 - `--record-key enter` uses Enter as start/stop recording key.
 - `--record-source <pulse-source>` selects non-default audio source.
-- `--stt-model tiny.en|base.en|small.en|...` chooses STT model.
+- `--stt-model tiny|base|small|...` chooses STT model.
 
 Forward full Codex startup args without changing your usual command style:
 
@@ -92,7 +93,7 @@ This runs `codex --model gpt-5 --approval never` inside the PTY bridge.
 If you need wrapper STT settings plus Codex args:
 
 ```bash
-python3 cli.py --stt-model base.en --model gpt-5 --approval never
+python3 cli.py --stt-model base --stt-language zh --model gpt-5 --approval never
 ```
 
 ## Integration tests
@@ -111,13 +112,16 @@ python3 -m unittest discover -s tests -v
 
 ## Environment variables
 
-- `STT_MODEL` default: `tiny.en`
-- `STT_LANGUAGE` default: `en`
+- `STT_MODEL` default: `small`
+- `STT_LANGUAGE` default: `zh`
+- `LANG_CODE` optional compatibility alias for `STT_LANGUAGE` (for external configs).
 - `STT_DEVICE` default: `cpu`
 - `STT_COMPUTE_TYPE` default: `int8`
 - `CODEX_CMD` default: `codex`
 - `VOICE_CODEX_RECORD_SOURCE` optional: force Pulse source name used by CLI recorder.
 - `VOICE_CODEX_RECORD_KEY` optional: `ctrl-x` (default), `ctrl-r`, `f8`, `f9`, or `enter`.
+
+If `LANG_CODE`/`STT_LANGUAGE` is Chinese (`zh*`) and model is accidentally set to English-only (`*.en`), the CLI auto-switches to `small`.
 
 ## Notes
 

@@ -8,6 +8,7 @@ VENV_PYTHON="${VENV_DIR}/bin/python3"
 LOCAL_BIN_DIR="${HOME}/.local/bin"
 VOICE_CODEX_LINK="${LOCAL_BIN_DIR}/voice-codex"
 PATH_LINE='export PATH="$HOME/.local/bin:$PATH"'
+ENV_FILE="${SCRIPT_DIR}/.voice-codex.env"
 
 if ! command -v python3 >/dev/null 2>&1; then
   echo "[install] python3 not found in PATH." >&2
@@ -17,6 +18,18 @@ fi
 if [[ ! -d "${VENV_DIR}" ]]; then
   echo "[install] creating virtualenv at ${VENV_DIR}"
   python3 -m venv "${VENV_DIR}"
+fi
+
+if [[ ! -f "${ENV_FILE}" ]]; then
+  cat >"${ENV_FILE}" <<'EOF'
+# Voice Codex defaults (loaded by ./voice-codex)
+STT_MODEL=small
+STT_LANGUAGE=zh
+
+# Compatibility alias: if your external config writes LANG_CODE, keep it in sync.
+# LANG_CODE=zh
+EOF
+  echo "[install] wrote default runtime config: ${ENV_FILE}"
 fi
 
 echo "[install] upgrading pip"
@@ -53,3 +66,4 @@ if [[ ":${PATH:-}:" != *":${LOCAL_BIN_DIR}:"* ]]; then
 fi
 
 echo "[install] done. Start with: voice-codex"
+echo "[install] defaults: STT_MODEL=small, STT_LANGUAGE=zh (LANG_CODE supported via .voice-codex.env)"

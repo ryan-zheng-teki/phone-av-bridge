@@ -5,6 +5,7 @@ SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
 SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
 REQUIREMENTS_FILE="${SCRIPT_DIR}/requirements.txt"
 VENV_PYTHON="${SCRIPT_DIR}/.venv/bin/python3"
+ENV_FILE="${SCRIPT_DIR}/.voice-codex.env"
 
 ensure_local_venv() {
   if [[ -x "${VENV_PYTHON}" ]]; then
@@ -33,7 +34,31 @@ PY
   "${VENV_PYTHON}" -m pip install -r "${REQUIREMENTS_FILE}"
 }
 
+load_voice_defaults() {
+  if [[ -f "${ENV_FILE}" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${ENV_FILE}"
+    set +a
+  fi
+
+  if [[ -z "${STT_LANGUAGE:-}" && -n "${LANG_CODE:-}" ]]; then
+    STT_LANGUAGE="${LANG_CODE}"
+  fi
+
+  : "${STT_LANGUAGE:=zh}"
+  : "${STT_MODEL:=small}"
+
+  lang_lower="$(printf '%s' "${STT_LANGUAGE}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${lang_lower}" == zh* && "${STT_MODEL}" == *.en ]]; then
+    STT_MODEL="small"
+  fi
+
+  export STT_LANGUAGE STT_MODEL
+}
+
 ensure_local_venv
 ensure_python_deps
+load_voice_defaults
 
 exec "${VENV_PYTHON}" "${SCRIPT_DIR}/cli.py" "$@"

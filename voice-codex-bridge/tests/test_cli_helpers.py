@@ -67,6 +67,18 @@ class VoiceCodexCliHelperTests(unittest.TestCase):
         self.assertTrue(self.cli.record_key_sequence_is_partial(b"\x1b[1", "f8"))
         self.assertFalse(self.cli.record_key_sequence_is_partial(b"\x1b[A", "f8"))
 
+    def test_resolve_stt_profile_switches_english_only_model_for_zh(self):
+        language, model, notice = self.cli.resolve_stt_profile(language="zh", model="tiny.en")
+        self.assertEqual(language, "zh")
+        self.assertEqual(model, "small")
+        self.assertIsNotNone(notice)
+
+    def test_resolve_stt_profile_keeps_multilingual_model_for_zh(self):
+        language, model, notice = self.cli.resolve_stt_profile(language="zh_cn", model="base")
+        self.assertEqual(language, "zh")
+        self.assertEqual(model, "base")
+        self.assertIsNone(notice)
+
     def test_transcript_draft_accumulates(self):
         bridge = self.cli.VoiceCodexCliBridge(
             codex_command="cat",
