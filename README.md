@@ -163,6 +163,41 @@ Notes:
 - Prefer `apt install ./...deb` over `dpkg -i ...deb` so apt can resolve system dependencies.
 - Local developer installer (`desktop-av-bridge-host/installers/linux/install.sh`) is still available, but release users should use the `.deb`.
 
+## WSL Quick Setup (Phone + Voice Codex)
+
+For WSL2 users, this repository includes an automation script that handles:
+- PATH normalization (`/usr/bin`, `/bin`, etc.),
+- Linux dependencies (`ffmpeg`, `pulseaudio-utils`, Python venv/pip),
+- Debian package build/install (with `/mnt/*` permission-safe build path),
+- host startup helpers for WSL.
+
+Run:
+
+```bash
+cd /mnt/d/autobyteus-org/phone-av-bridge
+./scripts/wsl-setup.sh
+```
+
+After script completion:
+- start host: `~/.local/bin/phone-av-bridge-host-start-wsl`
+- stop host: `~/.local/bin/phone-av-bridge-host-stop-wsl`
+
+For phone LAN access to a WSL host, run Windows admin commands (printed by script):
+
+```powershell
+netsh interface portproxy delete v4tov4 listenaddress=0.0.0.0 listenport=8787
+netsh interface portproxy add v4tov4 listenaddress=0.0.0.0 listenport=8787 connectaddress=<WSL_IP> connectport=8787
+netsh advfirewall firewall add rule name="PhoneAVBridge 8787" dir=in action=allow protocol=TCP localport=8787
+```
+
+Then pair with QR:
+- open `http://<WINDOWS_LAN_IP>:8787`,
+- use Android `Scan QR Pairing`.
+
+Note:
+- WSL host discovery list can be unreliable in this mode because discovery uses UDP (`39888`) and `portproxy` forwards TCP only.
+- QR pairing is the recommended WSL flow.
+
 ## Current macOS User Flow (Preview)
 
 1. Install host app with `desktop-av-bridge-host/installers/macos/install.command`.
