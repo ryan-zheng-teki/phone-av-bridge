@@ -1,6 +1,6 @@
 # desktop-av-bridge-host
 
-Linux/macOS host application layer for the Android Phone AV Bridge workflow.
+Linux/macOS host application layer for the Android+iOS Phone AV Bridge workflow.
 
 ## Goals
 
@@ -106,6 +106,20 @@ tail -n 120 ~/.local/state/phone-av-bridge-host/phone-av-bridge-host.log
   - `POST /api/toggles` body keys include `camera`, `microphone`, `speaker`, `cameraStreamUrl`, `deviceName`, `deviceId`
   - `POST /api/pair` also accepts optional `deviceName` and `deviceId`.
   - `POST /api/presence` accepts optional `deviceName` and `deviceId`.
+
+## iOS client integration (simulator-first)
+
+- iOS client package lives at `../ios-phone-av-bridge`.
+- iOS integration uses the same host contract as Android (`/api/bootstrap`, `/api/pair`, `/api/status`, `/api/toggles`, `/api/speaker/stream`).
+- Run representative iOS simulator E2E from repo root:
+
+```bash
+bash ios-phone-av-bridge/scripts/run_ios_sim_e2e.sh
+```
+
+- Current iOS validation scope in this repo:
+  - simulator validates host discovery/control/speaker-stream contract integration,
+  - physical-iPhone camera/microphone RTSP publishing validation remains device-only follow-up work.
 
 ## Media flow (Android -> Linux host)
 

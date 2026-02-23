@@ -1,6 +1,6 @@
 # Phone AV Bridge
 
-Unified root project for Android + desktop host + bridge tooling.
+Unified root project for Android + iOS + desktop host + bridge tooling.
 
 ## Modules
 
@@ -8,6 +8,10 @@ Unified root project for Android + desktop host + bridge tooling.
   - Android app with pairing, `Camera/Microphone/Speaker` toggles, and front/back camera lens selection.
 - `desktop-av-bridge-host/`
   - Desktop host app with local UI/API, preflight checks, discovery, and adapter orchestration.
+- `ios-phone-av-bridge/`
+  - iOS client Swift package for host discovery/control APIs, speaker-stream consumption, and Android-parity controller UI state/view model with SwiftUI screen, including simulator E2E harness.
+- `ios-phone-av-bridge-app/`
+  - Runnable iOS app target that hosts package UI and supports simulator app-level E2E tests.
 - `phone-av-camera-bridge-runtime/`
   - Bridge runtime and emulation harness used by Linux camera path.
 - `tickets/in-progress/` and `tickets/done/`
@@ -15,20 +19,24 @@ Unified root project for Android + desktop host + bridge tooling.
 
 ## Project Relationships
 
-1. `android-phone-av-bridge` is the phone-side controller and media source.
-2. `desktop-av-bridge-host` is the desktop-side orchestrator and API surface.
-3. `desktop-av-bridge-host` uses:
+1. `android-phone-av-bridge` is the Android phone-side controller and media source.
+2. `ios-phone-av-bridge` is the iOS client-side control/speaker-stream integration layer.
+3. `ios-phone-av-bridge-app` is the simulator-runnable iOS app shell using package logic.
+4. `desktop-av-bridge-host` is the desktop-side orchestrator and API surface.
+5. `desktop-av-bridge-host` uses:
    - `phone-av-camera-bridge-runtime` for Linux camera ingest/output (`adapters/linux-camera/bridge-runner.mjs` launches `phone-av-camera-bridge-runtime/bin/run-bridge.sh`).
    - `macos-camera-extension` runtime artifacts (`PhoneAVBridgeCamera.app`) for macOS virtual camera.
    - `desktop-av-bridge-host/macos-audio-driver` (`PhoneAVBridgeAudio.driver`) for macOS virtual mic/speaker route.
 
-In short: Android sends state/media -> Phone AV Bridge Host orchestrates -> platform adapters expose desktop camera/mic/speaker devices.
+In short: mobile client (Android/iOS) sends state/media -> Phone AV Bridge Host orchestrates -> platform adapters expose desktop camera/mic/speaker devices.
 
 ## Active vs Reference
 
 Active runtime projects:
 - `android-phone-av-bridge/`
 - `desktop-av-bridge-host/`
+- `ios-phone-av-bridge/` (iOS control/speaker path + simulator integration validation)
+- `ios-phone-av-bridge-app/` (runnable iOS app + simulator UI E2E validation)
 - `phone-av-camera-bridge-runtime/` (active on Linux camera path)
 - `macos-camera-extension/` (active on macOS camera path)
 
@@ -68,6 +76,34 @@ Host runtime endpoints:
 ```bash
 cd android-phone-av-bridge
 ./gradlew testDebugUnitTest
+```
+
+### iOS client package
+
+```bash
+cd ios-phone-av-bridge
+swift test
+```
+
+Run simulator representative E2E (starts host in mock mode, then runs iOS simulator tests):
+
+```bash
+cd /Users/normy/autobyteus_org/phone-av-bridge
+bash ios-phone-av-bridge/scripts/run_ios_sim_e2e.sh
+```
+
+### iOS simulator app target
+
+```bash
+cd ios-phone-av-bridge-app
+xcodegen generate
+```
+
+Run full app-level simulator E2E (host mock + iOS app UI tests):
+
+```bash
+cd /Users/normy/autobyteus_org/phone-av-bridge
+bash ios-phone-av-bridge-app/scripts/run_ios_app_sim_e2e.sh
 ```
 
 ### macOS camera app (local dev build + install)
@@ -192,7 +228,7 @@ netsh advfirewall firewall add rule name="PhoneAVBridge 8787" dir=in action=allo
 
 Then pair with QR:
 - open `http://<WINDOWS_LAN_IP>:8787`,
-- use Android `Scan QR Pairing`.
+- use mobile app `Scan QR Pairing` (Android or iOS).
 
 Note:
 - WSL host discovery list can be unreliable in this mode because discovery uses UDP (`39888`) and `portproxy` forwards TCP only.
@@ -204,7 +240,7 @@ Note:
 2. Install `PhoneAVBridgeCamera.app` into `/Applications` and launch it.
 3. `Phone AV Bridge Camera` auto-starts `Phone AV Bridge Host` in the background (when installed), and shows host bridge status in-app.
 4. Install Android APK and open `Phone AV Bridge`.
-5. In Android app, select a host from the visible host list and tap `Pair`; while already paired, select another host and tap `Switch`; or use `Scan QR Pairing` for explicit QR pairing.
+5. In mobile app (Android or iOS), select a host from the visible host list and tap `Pair`; while already paired, select another host and tap `Switch`; or use `Scan QR Pairing` for explicit QR pairing.
 6. Enable `Camera` and/or `Microphone` on phone.
 7. If camera is enabled, choose `Front` or `Back` lens on phone.
 8. In Zoom/meeting app on macOS:
@@ -246,11 +282,12 @@ Release can be triggered in two ways:
    - `release_android` (`true|false`)
    - `release_macos` (`true|false`)
    - `release_linux_deb` (`true|false`)
+   - `release_ios` (`true|false`)
 
 2. Push a tag:
    - default behavior: all targets
    - selective behavior: `v<version>+targets=<csv>`
-     - supported selectors: `android`, `linux`, `macos`, `all`
+     - supported selectors: `android`, `linux`, `macos`, `ios`, `all`
 
 Examples:
 
@@ -266,6 +303,10 @@ git push origin "v0.1.12+targets=android,linux"
 # macOS only
 git tag -a "v0.1.13+targets=macos" -m "Release v0.1.13 (macos)"
 git push origin "v0.1.13+targets=macos"
+
+# iOS simulator app only
+git tag -a "v0.1.14+targets=ios" -m "Release v0.1.14 (ios simulator app)"
+git push origin "v0.1.14+targets=ios"
 ```
 
 Published release assets:
@@ -273,6 +314,7 @@ Published release assets:
 - Android APK (`release` if signing secrets are configured, otherwise `debug`)
 - macOS camera app archive (`PhoneAVBridgeCamera` unsigned zip)
 - Linux Debian package (`phone-av-bridge-host_<version>_<arch>.deb`)
+- iOS simulator app archive (`PhoneAVBridgeIOSApp-ios-simulator-<version>-unsigned.zip`)
 - `SHA256SUMS.txt`
 
 Notes:

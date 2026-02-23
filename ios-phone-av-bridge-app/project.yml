@@ -1,0 +1,54 @@
+name: PhoneAVBridgeIOSApp
+options:
+  minimumXcodeGenVersion: 2.44.1
+  deploymentTarget:
+    iOS: 16.0
+settings:
+  base:
+    SWIFT_VERSION: 5.10
+    CODE_SIGNING_ALLOWED: NO
+    CODE_SIGNING_REQUIRED: NO
+    CODE_SIGN_IDENTITY: ""
+packages:
+  PhoneAVBridgeIOS:
+    path: ../ios-phone-av-bridge
+targets:
+  PhoneAVBridgeIOSApp:
+    type: application
+    platform: iOS
+    sources:
+      - path: PhoneAVBridgeIOSApp/Sources
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.autobyteus.phoneavbridge.ios
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Phone AV Bridge iOS
+        DEVELOPMENT_TEAM: ""
+    dependencies:
+      - package: PhoneAVBridgeIOS
+        product: PhoneAVBridgeIOS
+
+  PhoneAVBridgeIOSAppUITests:
+    type: bundle.ui-testing
+    platform: iOS
+    sources:
+      - path: PhoneAVBridgeIOSAppUITests
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: org.autobyteus.phoneavbridge.ios.uitests
+        GENERATE_INFOPLIST_FILE: YES
+        TEST_TARGET_NAME: PhoneAVBridgeIOSApp
+        DEVELOPMENT_TEAM: ""
+    dependencies:
+      - target: PhoneAVBridgeIOSApp
+schemes:
+  PhoneAVBridgeIOSApp:
+    build:
+      targets:
+        PhoneAVBridgeIOSApp: all
+    test:
+      gatherCoverageData: false
+      targets:
+        - PhoneAVBridgeIOSAppUITests

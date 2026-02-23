@@ -24,6 +24,16 @@ macos-camera-extension/Build/
 macos-camera-extension/build/
 macos-camera-extension/build_signed/
 macos-camera-extension/.build/
+ios-phone-av-bridge/.build/
+ios-phone-av-bridge/.derivedData-ios-sim/
+ios-phone-av-bridge/.ios-sim-host.log
+ios-phone-av-bridge/.ios-sim-test.log
+ios-phone-av-bridge-app/.derivedData-ios-app-sim/
+ios-phone-av-bridge-app/.ios-app-sim-host.log
+ios-phone-av-bridge-app/.ios-app-sim-test.log
+ios-phone-av-bridge-app/build_release_ios_sim/
+ios-phone-av-bridge-app/dist/
+ios-phone-av-bridge-app/.artifacts/
 macos-camera-extension/xcuserdata/
 **/xcuserdata/
 **/*.xcuserdatad

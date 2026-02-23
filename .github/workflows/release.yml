@@ -25,6 +25,11 @@ on:
         required: true
         type: boolean
         default: true
+      release_ios:
+        description: "Build and publish iOS simulator app artifact"
+        required: true
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -42,6 +47,7 @@ jobs:
       release_android: ${{ steps.meta.outputs.release_android }}
       release_macos: ${{ steps.meta.outputs.release_macos }}
       release_linux_deb: ${{ steps.meta.outputs.release_linux_deb }}
+      release_ios: ${{ steps.meta.outputs.release_ios }}
     steps:
       - id: meta
         shell: bash
@@ -51,21 +57,24 @@ jobs:
           RELEASE_ANDROID="true"
           RELEASE_MACOS="true"
           RELEASE_LINUX_DEB="true"
+          RELEASE_IOS="true"
           if [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" ]]; then
             TAG="${{ inputs.tag }}"
             RELEASE_ANDROID="${{ inputs.release_android }}"
             RELEASE_MACOS="${{ inputs.release_macos }}"
             RELEASE_LINUX_DEB="${{ inputs.release_linux_deb }}"
+            RELEASE_IOS="${{ inputs.release_ios }}"
           else
             if [[ "${TAG}" == *"+targets="* ]]; then
               TARGETS="${TAG#*+targets=}"
               if [[ -z "${TARGETS}" ]]; then
-                echo "Tag target selector is empty. Use +targets=android,linux,macos." >&2
+                echo "Tag target selector is empty. Use +targets=android,linux,macos,ios." >&2
                 exit 1
               fi
               RELEASE_ANDROID="false"
               RELEASE_MACOS="false"
               RELEASE_LINUX_DEB="false"
+              RELEASE_IOS="false"
               IFS=',' read -r -a TARGET_LIST <<< "${TARGETS}"
               for raw_target in "${TARGET_LIST[@]}"; do
                 target="$(echo "${raw_target}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
@@ -79,14 +88,18 @@ jobs:
                   linux|linux-deb|debian|deb)
                     RELEASE_LINUX_DEB="true"
                     ;;
+                  ios|iphone)
+                    RELEASE_IOS="true"
+                    ;;
                   all)
                     RELEASE_ANDROID="true"
                     RELEASE_MACOS="true"
                     RELEASE_LINUX_DEB="true"
+                    RELEASE_IOS="true"
                     ;;
                   *)
                     echo "Unsupported target selector '${target}' in tag '${TAG}'." >&2
-                    echo "Supported values: android, macos, linux, all." >&2
+                    echo "Supported values: android, macos, linux, ios, all." >&2
                     exit 1
                     ;;
                 esac
@@ -107,7 +120,7 @@ jobs:
             echo "Version cannot be empty." >&2
             exit 1
           fi
-          if [[ "${RELEASE_ANDROID}" != "true" && "${RELEASE_MACOS}" != "true" && "${RELEASE_LINUX_DEB}" != "true" ]]; then
+          if [[ "${RELEASE_ANDROID}" != "true" && "${RELEASE_MACOS}" != "true" && "${RELEASE_LINUX_DEB}" != "true" && "${RELEASE_IOS}" != "true" ]]; then
             echo "At least one release artifact must be enabled." >&2
             exit 1
           fi
@@ -116,6 +129,7 @@ jobs:
           echo "release_android=${RELEASE_ANDROID}" >> "${GITHUB_OUTPUT}"
           echo "release_macos=${RELEASE_MACOS}" >> "${GITHUB_OUTPUT}"
           echo "release_linux_deb=${RELEASE_LINUX_DEB}" >> "${GITHUB_OUTPUT}"
+          echo "release_ios=${RELEASE_IOS}" >> "${GITHUB_OUTPUT}"
 
   build_android:
     runs-on: ubuntu-latest
@@ -232,6 +246,30 @@ jobs:
           path: desktop-av-bridge-host/dist/phone-av-bridge-host_${{ needs.prepare.outputs.version }}_*.deb
           if-no-files-found: error
 
+  build_ios_app:
+    runs-on: macos-latest
+    needs: prepare
+    if: needs.prepare.outputs.release_ios == 'true'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build unsigned iOS simulator app archive
+        working-directory: ios-phone-av-bridge-app
+        env:
+          RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x scripts/build-ios-simulator-release.sh
+          scripts/build-ios-simulator-release.sh
+
+      - name: Upload iOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ios-simulator-app-zip
+          path: ios-phone-av-bridge-app/dist/PhoneAVBridgeIOSApp-ios-simulator-${{ needs.prepare.outputs.version }}-unsigned.zip
+          if-no-files-found: error
+
   publish_release:
     runs-on: ubuntu-latest
     if: >
@@ -239,12 +277,14 @@ jobs:
       needs.prepare.result == 'success' &&
       (needs.build_android.result == 'success' || needs.build_android.result == 'skipped') &&
       (needs.build_macos_camera.result == 'success' || needs.build_macos_camera.result == 'skipped') &&
-      (needs.build_linux_deb.result == 'success' || needs.build_linux_deb.result == 'skipped')
+      (needs.build_linux_deb.result == 'success' || needs.build_linux_deb.result == 'skipped') &&
+      (needs.build_ios_app.result == 'success' || needs.build_ios_app.result == 'skipped')
     needs:
       - prepare
       - build_android
       - build_macos_camera
       - build_linux_deb
+      - build_ios_app
     steps:
       - name: Download built artifacts
         uses: actions/download-artifact@v4
@@ -266,6 +306,7 @@ jobs:
           RELEASE_ANDROID: ${{ needs.prepare.outputs.release_android }}
           RELEASE_MACOS: ${{ needs.prepare.outputs.release_macos }}
           RELEASE_LINUX_DEB: ${{ needs.prepare.outputs.release_linux_deb }}
+          RELEASE_IOS: ${{ needs.prepare.outputs.release_ios }}
           APK_NAME: ${{ needs.build_android.outputs.apk_name }}
           APK_CHANNEL: ${{ needs.build_android.outputs.apk_channel }}
         shell: bash
@@ -289,6 +330,9 @@ jobs:
             fi
             if [[ "${RELEASE_LINUX_DEB}" == "true" ]]; then
               echo "- Linux Debian package (\`.deb\`)"
+            fi
+            if [[ "${RELEASE_IOS}" == "true" ]]; then
+              echo "- iOS simulator app archive (unsigned)"
             fi
             echo "- \`SHA256SUMS.txt\` for integrity verification"
             if [[ "${RELEASE_ANDROID}" == "true" ]]; then

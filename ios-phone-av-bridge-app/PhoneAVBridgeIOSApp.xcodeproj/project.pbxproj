@@ -1,0 +1,454 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		60AF38C64D46A11A78089151 /* AppConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD17E498AE33B60A07D66895 /* AppConfig.swift */; };
+		AF4FC1D58DCCBCF15F2F4CED /* RootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C15EB64A6D5D3A8BC0F2F915 /* RootView.swift */; };
+		B080350E6793A59D8DBFCCA4 /* PhoneAVBridgeIOS in Frameworks */ = {isa = PBXBuildFile; productRef = BB3CE2E50453C3DB373FCA75 /* PhoneAVBridgeIOS */; };
+		EF8ED9D033E4F3D6A6F3484A /* PhoneAVBridgeIOSApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9E870CDEF22F9F994ED60802 /* PhoneAVBridgeIOSApp.swift */; };
+		F47D7F647EB60FACACCAB3EB /* PhoneAVBridgeIOSAppUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C030C388105B8B24415FF853 /* PhoneAVBridgeIOSAppUITests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		9E191558970143D91031915D /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 32B8DBDB651B15403BDDAA0A /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = AF71506C54D21E58485BC43F;
+			remoteInfo = PhoneAVBridgeIOSApp;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXFileReference section */
+		75626241C8A5312B3927DE7B /* PhoneAVBridgeIOSApp.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = PhoneAVBridgeIOSApp.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		8867F192AF76892B45844D33 /* ios-phone-av-bridge */ = {isa = PBXFileReference; lastKnownFileType = folder; name = "ios-phone-av-bridge"; path = "../ios-phone-av-bridge"; sourceTree = SOURCE_ROOT; };
+		9E870CDEF22F9F994ED60802 /* PhoneAVBridgeIOSApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAVBridgeIOSApp.swift; sourceTree = "<group>"; };
+		C030C388105B8B24415FF853 /* PhoneAVBridgeIOSAppUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PhoneAVBridgeIOSAppUITests.swift; sourceTree = "<group>"; };
+		C15EB64A6D5D3A8BC0F2F915 /* RootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RootView.swift; sourceTree = "<group>"; };
+		CD1395942E633C77307FB50E /* PhoneAVBridgeIOSAppUITests.xctest */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.cfbundle; path = PhoneAVBridgeIOSAppUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		DD17E498AE33B60A07D66895 /* AppConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppConfig.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		818075165F997D189878972B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				B080350E6793A59D8DBFCCA4 /* PhoneAVBridgeIOS in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		3C1673B346CA72838255C4C7 /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				8867F192AF76892B45844D33 /* ios-phone-av-bridge */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
+		409E5AEE49751D78D9B7C994 = {
+			isa = PBXGroup;
+			children = (
+				3C1673B346CA72838255C4C7 /* Packages */,
+				8CABEE2BFAE1339F745052CE /* PhoneAVBridgeIOSAppUITests */,
+				93C78C5D35BD84EA999A9893 /* Sources */,
+				93012112FB5D74A13D515CB6 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		8CABEE2BFAE1339F745052CE /* PhoneAVBridgeIOSAppUITests */ = {
+			isa = PBXGroup;
+			children = (
+				C030C388105B8B24415FF853 /* PhoneAVBridgeIOSAppUITests.swift */,
+			);
+			path = PhoneAVBridgeIOSAppUITests;
+			sourceTree = "<group>";
+		};
+		93012112FB5D74A13D515CB6 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				75626241C8A5312B3927DE7B /* PhoneAVBridgeIOSApp.app */,
+				CD1395942E633C77307FB50E /* PhoneAVBridgeIOSAppUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		93C78C5D35BD84EA999A9893 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				DD17E498AE33B60A07D66895 /* AppConfig.swift */,
+				9E870CDEF22F9F994ED60802 /* PhoneAVBridgeIOSApp.swift */,
+				C15EB64A6D5D3A8BC0F2F915 /* RootView.swift */,
+			);
+			name = Sources;
+			path = PhoneAVBridgeIOSApp/Sources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AF71506C54D21E58485BC43F /* PhoneAVBridgeIOSApp */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = CD744A536B331B6B61D8117B /* Build configuration list for PBXNativeTarget "PhoneAVBridgeIOSApp" */;
+			buildPhases = (
+				B367E433B8CE3290528414B1 /* Sources */,
+				818075165F997D189878972B /* Frameworks */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = PhoneAVBridgeIOSApp;
+			packageProductDependencies = (
+				BB3CE2E50453C3DB373FCA75 /* PhoneAVBridgeIOS */,
+			);
+			productName = PhoneAVBridgeIOSApp;
+			productReference = 75626241C8A5312B3927DE7B /* PhoneAVBridgeIOSApp.app */;
+			productType = "com.apple.product-type.application";
+		};
+		C9172923E3DAF58C79DE3DD8 /* PhoneAVBridgeIOSAppUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 1234620A8F0C6932BB804620 /* Build configuration list for PBXNativeTarget "PhoneAVBridgeIOSAppUITests" */;
+			buildPhases = (
+				5605EA41260EFEF7F36A595B /* Sources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				CF8B0A2A8F4FFA6B34D4AFE5 /* PBXTargetDependency */,
+			);
+			name = PhoneAVBridgeIOSAppUITests;
+			packageProductDependencies = (
+			);
+			productName = PhoneAVBridgeIOSAppUITests;
+			productReference = CD1395942E633C77307FB50E /* PhoneAVBridgeIOSAppUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		32B8DBDB651B15403BDDAA0A /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = YES;
+				LastUpgradeCheck = 1430;
+				TargetAttributes = {
+					AF71506C54D21E58485BC43F = {
+						DevelopmentTeam = "";
+					};
+					C9172923E3DAF58C79DE3DD8 = {
+						DevelopmentTeam = "";
+						TestTargetID = AF71506C54D21E58485BC43F;
+					};
+				};
+			};
+			buildConfigurationList = 60F5DEE50A0006E19E93926A /* Build configuration list for PBXProject "PhoneAVBridgeIOSApp" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				Base,
+				en,
+			);
+			mainGroup = 409E5AEE49751D78D9B7C994;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				24B1B693523E6F13C9268028 /* XCLocalSwiftPackageReference "../ios-phone-av-bridge" */,
+			);
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				AF71506C54D21E58485BC43F /* PhoneAVBridgeIOSApp */,
+				C9172923E3DAF58C79DE3DD8 /* PhoneAVBridgeIOSAppUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXSourcesBuildPhase section */
+		5605EA41260EFEF7F36A595B /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				F47D7F647EB60FACACCAB3EB /* PhoneAVBridgeIOSAppUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		B367E433B8CE3290528414B1 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				60AF38C64D46A11A78089151 /* AppConfig.swift in Sources */,
+				EF8ED9D033E4F3D6A6F3484A /* PhoneAVBridgeIOSApp.swift in Sources */,
+				AF4FC1D58DCCBCF15F2F4CED /* RootView.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		CF8B0A2A8F4FFA6B34D4AFE5 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = AF71506C54D21E58485BC43F /* PhoneAVBridgeIOSApp */;
+			targetProxy = 9E191558970143D91031915D /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		22BC5CAA64A88D7E5E97133C /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.1;
+			};
+			name = Release;
+		};
+		862C526CF79BCCCADE9625F9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.autobyteus.phoneavbridge.ios.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PhoneAVBridgeIOSApp;
+			};
+			name = Release;
+		};
+		9F72A58397569E4BD8E03AF8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@loader_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.autobyteus.phoneavbridge.ios.uitests;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = PhoneAVBridgeIOSApp;
+			};
+			name = Debug;
+		};
+		B0EEE4E71B95B2AA37973320 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Phone AV Bridge iOS";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.autobyteus.phoneavbridge.ios;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		CE1C358963BD3A16133B92AE /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				CODE_SIGN_IDENTITY = "iPhone Developer";
+				DEVELOPMENT_TEAM = "";
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "Phone AV Bridge iOS";
+				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
+				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+				);
+				PRODUCT_BUNDLE_IDENTIFIER = org.autobyteus.phoneavbridge.ios;
+				SDKROOT = iphoneos;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		FA2E81A348F231686F3CEC36 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				CODE_SIGNING_ALLOWED = NO;
+				CODE_SIGNING_REQUIRED = NO;
+				CODE_SIGN_IDENTITY = "";
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"$(inherited)",
+					"DEBUG=1",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 16.0;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SDKROOT = iphoneos;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.1;
+			};
+			name = Debug;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		1234620A8F0C6932BB804620 /* Build configuration list for PBXNativeTarget "PhoneAVBridgeIOSAppUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9F72A58397569E4BD8E03AF8 /* Debug */,
+				862C526CF79BCCCADE9625F9 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		60F5DEE50A0006E19E93926A /* Build configuration list for PBXProject "PhoneAVBridgeIOSApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				FA2E81A348F231686F3CEC36 /* Debug */,
+				22BC5CAA64A88D7E5E97133C /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+		CD744A536B331B6B61D8117B /* Build configuration list for PBXNativeTarget "PhoneAVBridgeIOSApp" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				CE1C358963BD3A16133B92AE /* Debug */,
+				B0EEE4E71B95B2AA37973320 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Debug;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		24B1B693523E6F13C9268028 /* XCLocalSwiftPackageReference "../ios-phone-av-bridge" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = "../ios-phone-av-bridge";
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		BB3CE2E50453C3DB373FCA75 /* PhoneAVBridgeIOS */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = PhoneAVBridgeIOS;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 32B8DBDB651B15403BDDAA0A /* Project object */;
+}
