@@ -314,7 +314,7 @@ Published release assets:
 - Android APK (`release` if signing secrets are configured, otherwise `debug`)
 - macOS camera app archive (`PhoneAVBridgeCamera` unsigned zip)
 - Linux Debian package (`phone-av-bridge-host_<version>_<arch>.deb`)
-- iOS simulator app archive (`PhoneAVBridgeIOSApp-ios-simulator-<version>-unsigned.zip`)
+- iOS app archive (`PhoneAVBridgeIOSApp-ios-<version>-unsigned.zip`)
 - `SHA256SUMS.txt`
 
 Notes:

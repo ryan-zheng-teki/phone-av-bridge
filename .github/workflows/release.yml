@@ -253,7 +253,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build unsigned iOS simulator app archive
+      - name: Build unsigned iOS app archive
         working-directory: ios-phone-av-bridge-app
         env:
           RELEASE_VERSION: ${{ needs.prepare.outputs.version }}
@@ -266,8 +266,8 @@ jobs:
       - name: Upload iOS artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ios-simulator-app-zip
-          path: ios-phone-av-bridge-app/dist/PhoneAVBridgeIOSApp-ios-simulator-${{ needs.prepare.outputs.version }}-unsigned.zip
+          name: ios-app-zip
+          path: ios-phone-av-bridge-app/dist/PhoneAVBridgeIOSApp-ios-${{ needs.prepare.outputs.version }}-unsigned.zip
           if-no-files-found: error
 
   publish_release:
@@ -332,7 +332,7 @@ jobs:
               echo "- Linux Debian package (\`.deb\`)"
             fi
             if [[ "${RELEASE_IOS}" == "true" ]]; then
-              echo "- iOS simulator app archive (unsigned)"
+              echo "- iOS app archive (unsigned)"
             fi
             echo "- \`SHA256SUMS.txt\` for integrity verification"
             if [[ "${RELEASE_ANDROID}" == "true" ]]; then

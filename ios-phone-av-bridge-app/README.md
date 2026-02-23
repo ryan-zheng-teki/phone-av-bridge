@@ -32,7 +32,7 @@ RELEASE_VERSION=0.1.14 bash ios-phone-av-bridge-app/scripts/build-ios-simulator-
 
 Output artifact:
 
-- `ios-phone-av-bridge-app/dist/PhoneAVBridgeIOSApp-ios-simulator-<version>-unsigned.zip`
+- `ios-phone-av-bridge-app/dist/PhoneAVBridgeIOSApp-ios-<version>-unsigned.zip`
 
 ## Manual simulator install/launch
 

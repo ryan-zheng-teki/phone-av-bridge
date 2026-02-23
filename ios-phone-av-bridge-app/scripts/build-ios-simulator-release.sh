@@ -36,7 +36,7 @@ if [[ ! -d "${APP_PATH}" ]]; then
 fi
 
 mkdir -p "${DIST_DIR}"
-ZIP_NAME="${APP_PRODUCT_NAME%.app}-ios-simulator-${VERSION_SUFFIX}-unsigned.zip"
+ZIP_NAME="${APP_PRODUCT_NAME%.app}-ios-${VERSION_SUFFIX}-unsigned.zip"
 ZIP_PATH="${DIST_DIR}/${ZIP_NAME}"
 rm -f "${ZIP_PATH}"
 
