@@ -1,6 +1,13 @@
 import Cocoa
 
 struct CameraMainViewRefs {
+    let wizardTabView: NSTabView
+    let wizardBackButton: NSButton
+    let wizardNextButton: NSButton
+    let stepOneChip: NSTextField
+    let stepTwoChip: NSTextField
+    let stepThreeChip: NSTextField
+    let extensionSetupHintLabel: NSTextField
     let statusBadge: NSTextField
     let statusDetailLabel: NSTextField
     let streamDemandLabel: NSTextField
@@ -32,50 +39,163 @@ final class CameraMainViewBuilder {
 
         let rootStack = NSStackView()
         rootStack.orientation = .vertical
-        rootStack.spacing = 14
+        rootStack.alignment = .centerX
+        rootStack.spacing = 12
         rootStack.translatesAutoresizingMaskIntoConstraints = false
         view.addSubview(rootStack)
 
         NSLayoutConstraint.activate([
-            rootStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 18),
-            rootStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 20),
-            rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -20),
+            rootStack.topAnchor.constraint(equalTo: view.topAnchor, constant: 16),
+            rootStack.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 18),
+            rootStack.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -18),
             rootStack.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16),
         ])
 
         let titleLabel = NSTextField(labelWithString: "Phone AV Bridge Camera")
-        titleLabel.font = NSFont.systemFont(ofSize: 30, weight: .bold)
-        titleLabel.textColor = .labelColor
+        titleLabel.font = NSFont.systemFont(ofSize: 32, weight: .bold)
+        titleLabel.alignment = .center
 
-        let subtitleLabel = NSTextField(labelWithString: "Runs your virtual camera extension and receives live frames from host bridge.")
-        subtitleLabel.font = NSFont.systemFont(ofSize: 14, weight: .regular)
+        let subtitleLabel = NSTextField(labelWithString: "Guided setup: enable extension first, then connect phone.")
+        subtitleLabel.font = NSFont.systemFont(ofSize: 13, weight: .regular)
+        subtitleLabel.alignment = .center
         subtitleLabel.textColor = .secondaryLabelColor
-        subtitleLabel.lineBreakMode = .byWordWrapping
-        subtitleLabel.maximumNumberOfLines = 2
 
         rootStack.addArrangedSubview(titleLabel)
         rootStack.addArrangedSubview(subtitleLabel)
 
-        let hostCard = NSBox()
-        hostCard.boxType = .custom
-        hostCard.cornerRadius = 12
-        hostCard.fillColor = NSColor.controlBackgroundColor
-        hostCard.borderColor = NSColor.separatorColor
-        hostCard.borderWidth = 1
-        hostCard.translatesAutoresizingMaskIntoConstraints = false
-        rootStack.addArrangedSubview(hostCard)
+        let stepProgressRow = NSStackView()
+        stepProgressRow.orientation = .horizontal
+        stepProgressRow.alignment = .centerY
+        stepProgressRow.distribution = .fillEqually
+        stepProgressRow.spacing = 8
 
-        let hostStack = NSStackView()
-        hostStack.orientation = .vertical
-        hostStack.spacing = 8
-        hostStack.translatesAutoresizingMaskIntoConstraints = false
-        hostCard.contentView?.addSubview(hostStack)
+        let stepOneChip = Self.makeStepChip("1. Extension")
+        let stepTwoChip = Self.makeStepChip("2. Connect Phone")
+        let stepThreeChip = Self.makeStepChip("3. Runtime")
+
+        stepProgressRow.addArrangedSubview(stepOneChip)
+        stepProgressRow.addArrangedSubview(stepTwoChip)
+        stepProgressRow.addArrangedSubview(stepThreeChip)
+        rootStack.addArrangedSubview(stepProgressRow)
+
+        let wizardCard = Self.makeCard()
+        rootStack.addArrangedSubview(wizardCard)
+        let maxContentWidth: CGFloat = 760
+        let minContentWidth: CGFloat = 720
         NSLayoutConstraint.activate([
-            hostStack.topAnchor.constraint(equalTo: hostCard.contentView!.topAnchor, constant: 12),
-            hostStack.leadingAnchor.constraint(equalTo: hostCard.contentView!.leadingAnchor, constant: 12),
-            hostStack.trailingAnchor.constraint(equalTo: hostCard.contentView!.trailingAnchor, constant: -12),
-            hostStack.bottomAnchor.constraint(equalTo: hostCard.contentView!.bottomAnchor, constant: -12),
+            wizardCard.heightAnchor.constraint(greaterThanOrEqualToConstant: 600),
+            wizardCard.widthAnchor.constraint(lessThanOrEqualToConstant: maxContentWidth),
+            wizardCard.widthAnchor.constraint(greaterThanOrEqualToConstant: minContentWidth),
+            stepProgressRow.widthAnchor.constraint(equalTo: wizardCard.widthAnchor),
         ])
+
+        let wizardStack = Self.embedStack(in: wizardCard, spacing: 10)
+
+        let wizardTabView = NSTabView()
+        wizardTabView.tabViewType = .noTabsNoBorder
+        wizardTabView.translatesAutoresizingMaskIntoConstraints = false
+        wizardStack.addArrangedSubview(wizardTabView)
+        NSLayoutConstraint.activate([
+            wizardTabView.heightAnchor.constraint(greaterThanOrEqualToConstant: 520),
+            wizardTabView.widthAnchor.constraint(equalTo: wizardCard.widthAnchor, constant: -24),
+        ])
+
+        let stepOneView = NSView()
+        stepOneView.translatesAutoresizingMaskIntoConstraints = false
+        let stepOneItem = NSTabViewItem(identifier: "wizard-step-extension")
+        stepOneItem.label = "Extension"
+        stepOneItem.view = stepOneView
+        wizardTabView.addTabViewItem(stepOneItem)
+
+        let stepOneStack = Self.embedScrollableStack(in: stepOneView)
+        stepOneStack.spacing = 12
+        stepOneStack.edgeInsets = NSEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
+
+        let extensionCard = Self.makeCard()
+        stepOneStack.addArrangedSubview(extensionCard)
+        NSLayoutConstraint.activate([
+            extensionCard.widthAnchor.constraint(equalTo: stepOneView.widthAnchor, constant: -24),
+        ])
+        let extensionStack = Self.embedStack(in: extensionCard, spacing: 10)
+
+        let extensionTitle = NSTextField(labelWithString: "Step 1: Enable Camera Extension")
+        extensionTitle.font = NSFont.systemFont(ofSize: 20, weight: .bold)
+
+        let extensionExplainer = NSTextField(labelWithString: "Order matters: click Enable Extension first. If macOS requests approval, click Open Settings and allow Camera Extension.")
+        extensionExplainer.font = NSFont.systemFont(ofSize: 13, weight: .regular)
+        extensionExplainer.textColor = .secondaryLabelColor
+        extensionExplainer.lineBreakMode = .byWordWrapping
+        extensionExplainer.maximumNumberOfLines = 3
+
+        let statusBadge = NSTextField(labelWithString: "Idle")
+        statusBadge.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        statusBadge.alignment = .center
+        statusBadge.wantsLayer = true
+        statusBadge.layer?.cornerRadius = 8
+        statusBadge.layer?.masksToBounds = true
+        statusBadge.backgroundColor = .clear
+        statusBadge.drawsBackground = true
+
+        let statusDetailLabel = NSTextField(labelWithString: "Preparing frame server and extension environment...")
+        statusDetailLabel.font = NSFont.systemFont(ofSize: 13, weight: .regular)
+        statusDetailLabel.textColor = .secondaryLabelColor
+        statusDetailLabel.lineBreakMode = .byWordWrapping
+        statusDetailLabel.maximumNumberOfLines = 2
+
+        let extensionSetupHintLabel = NSTextField(labelWithString: "1) Click Enable Extension. 2) If prompted, open Settings to approve.")
+        extensionSetupHintLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
+        extensionSetupHintLabel.textColor = .secondaryLabelColor
+        extensionSetupHintLabel.lineBreakMode = .byWordWrapping
+        extensionSetupHintLabel.maximumNumberOfLines = 2
+
+        let extensionActionRow = NSStackView()
+        extensionActionRow.orientation = .horizontal
+        extensionActionRow.distribution = .fillEqually
+        extensionActionRow.spacing = 10
+
+        let enableButton = NSButton(title: "Enable Extension", target: target, action: Selector(("activate:")))
+        enableButton.bezelStyle = .rounded
+        enableButton.controlSize = .large
+
+        let openSettingsButton = NSButton(title: "Open Settings", target: target, action: Selector(("openExtensionsSettings:")))
+        openSettingsButton.bezelStyle = .texturedRounded
+        openSettingsButton.controlSize = .large
+
+        let disableButton = NSButton(title: "Disable Extension", target: target, action: Selector(("deactivate:")))
+        disableButton.bezelStyle = .texturedRounded
+        disableButton.controlSize = .large
+
+        extensionActionRow.addArrangedSubview(enableButton)
+        extensionActionRow.addArrangedSubview(openSettingsButton)
+        extensionActionRow.addArrangedSubview(disableButton)
+
+        extensionStack.addArrangedSubview(extensionTitle)
+        extensionStack.addArrangedSubview(extensionExplainer)
+        extensionStack.addArrangedSubview(statusBadge)
+        extensionStack.addArrangedSubview(statusDetailLabel)
+        extensionStack.addArrangedSubview(extensionSetupHintLabel)
+        extensionStack.addArrangedSubview(extensionActionRow)
+
+        let stepTwoView = NSView()
+        stepTwoView.translatesAutoresizingMaskIntoConstraints = false
+        let stepTwoItem = NSTabViewItem(identifier: "wizard-step-connect")
+        stepTwoItem.label = "Connect"
+        stepTwoItem.view = stepTwoView
+        wizardTabView.addTabViewItem(stepTwoItem)
+
+        let stepTwoStack = Self.embedScrollableStack(in: stepTwoView)
+        stepTwoStack.spacing = 12
+        stepTwoStack.edgeInsets = NSEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
+
+        let hostCard = Self.makeCard()
+        stepTwoStack.addArrangedSubview(hostCard)
+        NSLayoutConstraint.activate([
+            hostCard.widthAnchor.constraint(equalTo: stepTwoView.widthAnchor, constant: -24),
+        ])
+        let hostStack = Self.embedStack(in: hostCard, spacing: 8)
+
+        let hostTitle = NSTextField(labelWithString: "Step 2: Connect Phone")
+        hostTitle.font = NSFont.systemFont(ofSize: 20, weight: .bold)
 
         let hostBridgeBadge = NSTextField(labelWithString: "Offline")
         hostBridgeBadge.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
@@ -94,7 +214,7 @@ final class CameraMainViewBuilder {
 
         let hostControlsRow = NSStackView()
         hostControlsRow.orientation = .horizontal
-        hostControlsRow.distribution = .fillProportionally
+        hostControlsRow.distribution = .fillEqually
         hostControlsRow.spacing = 10
 
         let hostBridgeStartButton = NSButton(title: "Start Host Bridge", target: target, action: Selector(("startHostBridge:")))
@@ -108,13 +228,10 @@ final class CameraMainViewBuilder {
         hostControlsRow.addArrangedSubview(hostBridgeStartButton)
         hostControlsRow.addArrangedSubview(hostBridgeOpenButton)
 
-        hostStack.addArrangedSubview(hostBridgeBadge)
-        hostStack.addArrangedSubview(hostBridgeDetailLabel)
-        hostStack.addArrangedSubview(hostControlsRow)
-
         let qrContainer = NSStackView()
         qrContainer.orientation = .horizontal
         qrContainer.alignment = .top
+        qrContainer.distribution = .fill
         qrContainer.spacing = 12
 
         let qrImageView = NSImageView()
@@ -126,8 +243,8 @@ final class CameraMainViewBuilder {
         qrImageView.imageAlignment = .alignCenter
         qrImageView.translatesAutoresizingMaskIntoConstraints = false
         NSLayoutConstraint.activate([
-            qrImageView.widthAnchor.constraint(equalToConstant: 172),
-            qrImageView.heightAnchor.constraint(equalToConstant: 172),
+            qrImageView.widthAnchor.constraint(equalToConstant: 168),
+            qrImageView.heightAnchor.constraint(equalToConstant: 168),
         ])
 
         let qrInfoStack = NSStackView()
@@ -136,7 +253,6 @@ final class CameraMainViewBuilder {
 
         let qrTitleLabel = NSTextField(labelWithString: "Phone Pairing QR")
         qrTitleLabel.font = NSFont.systemFont(ofSize: 14, weight: .semibold)
-        qrTitleLabel.textColor = .labelColor
 
         let qrStatusLabel = NSTextField(labelWithString: "Checking host bridge...")
         qrStatusLabel.font = NSFont.systemFont(ofSize: 12, weight: .regular)
@@ -170,11 +286,9 @@ final class CameraMainViewBuilder {
 
         qrContainer.addArrangedSubview(qrImageView)
         qrContainer.addArrangedSubview(qrInfoStack)
-        hostStack.addArrangedSubview(qrContainer)
 
         let divider = NSBox()
         divider.boxType = .separator
-        hostStack.addArrangedSubview(divider)
 
         let resourceStatusBadge = NSTextField(labelWithString: "Unavailable")
         resourceStatusBadge.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
@@ -199,19 +313,25 @@ final class CameraMainViewBuilder {
         let (cameraRow, cameraStatusChip) = Self.makeResourceRow("Camera")
         let (microphoneRow, microphoneStatusChip) = Self.makeResourceRow("Microphone")
         let (speakerRow, speakerStatusChip) = Self.makeResourceRow("Speaker")
-
         let (lensRow, cameraLensValueLabel) = Self.makeMetadataRow("Camera Lens", initialValue: "Unknown")
         let (orientationRow, cameraOrientationValueLabel) = Self.makeMetadataRow("Orientation", initialValue: "Unknown")
 
         let resourceControlsRow = NSStackView()
         resourceControlsRow.orientation = .horizontal
-        resourceControlsRow.distribution = .fillProportionally
+        resourceControlsRow.distribution = .fillEqually
         resourceControlsRow.spacing = 10
+
         let syncResourceButton = NSButton(title: "Refresh Status", target: target, action: Selector(("syncHostResourceStatus:")))
         syncResourceButton.bezelStyle = .texturedRounded
         syncResourceButton.controlSize = .large
         resourceControlsRow.addArrangedSubview(syncResourceButton)
 
+        hostStack.addArrangedSubview(hostTitle)
+        hostStack.addArrangedSubview(hostBridgeBadge)
+        hostStack.addArrangedSubview(hostBridgeDetailLabel)
+        hostStack.addArrangedSubview(hostControlsRow)
+        hostStack.addArrangedSubview(qrContainer)
+        hostStack.addArrangedSubview(divider)
         hostStack.addArrangedSubview(resourceStatusBadge)
         hostStack.addArrangedSubview(phoneIdentityLabel)
         hostStack.addArrangedSubview(resourceIssuesLabel)
@@ -222,71 +342,34 @@ final class CameraMainViewBuilder {
         hostStack.addArrangedSubview(orientationRow)
         hostStack.addArrangedSubview(resourceControlsRow)
 
-        let statusCard = NSBox()
-        statusCard.boxType = .custom
-        statusCard.cornerRadius = 12
-        statusCard.fillColor = NSColor.controlBackgroundColor
-        statusCard.borderColor = NSColor.separatorColor
-        statusCard.borderWidth = 1
-        statusCard.translatesAutoresizingMaskIntoConstraints = false
-        rootStack.addArrangedSubview(statusCard)
+        let stepThreeView = NSView()
+        stepThreeView.translatesAutoresizingMaskIntoConstraints = false
+        let stepThreeItem = NSTabViewItem(identifier: "wizard-step-runtime")
+        stepThreeItem.label = "Runtime"
+        stepThreeItem.view = stepThreeView
+        wizardTabView.addTabViewItem(stepThreeItem)
 
-        let statusStack = NSStackView()
-        statusStack.orientation = .vertical
-        statusStack.spacing = 8
-        statusStack.translatesAutoresizingMaskIntoConstraints = false
-        statusCard.contentView?.addSubview(statusStack)
+        let stepThreeStack = Self.embedScrollableStack(in: stepThreeView)
+        stepThreeStack.spacing = 12
+        stepThreeStack.edgeInsets = NSEdgeInsets(top: 8, left: 4, bottom: 8, right: 4)
+
+        let runtimeCard = Self.makeCard()
+        stepThreeStack.addArrangedSubview(runtimeCard)
         NSLayoutConstraint.activate([
-            statusStack.topAnchor.constraint(equalTo: statusCard.contentView!.topAnchor, constant: 12),
-            statusStack.leadingAnchor.constraint(equalTo: statusCard.contentView!.leadingAnchor, constant: 12),
-            statusStack.trailingAnchor.constraint(equalTo: statusCard.contentView!.trailingAnchor, constant: -12),
-            statusStack.bottomAnchor.constraint(equalTo: statusCard.contentView!.bottomAnchor, constant: -12),
+            runtimeCard.widthAnchor.constraint(equalTo: stepThreeView.widthAnchor, constant: -24),
         ])
+        let runtimeStack = Self.embedStack(in: runtimeCard, spacing: 10)
 
-        let statusBadge = NSTextField(labelWithString: "Idle")
-        statusBadge.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        statusBadge.alignment = .center
-        statusBadge.wantsLayer = true
-        statusBadge.layer?.cornerRadius = 8
-        statusBadge.layer?.masksToBounds = true
-        statusBadge.backgroundColor = NSColor.clear
-        statusBadge.drawsBackground = true
+        let runtimeTitle = NSTextField(labelWithString: "Step 3: Runtime Monitor")
+        runtimeTitle.font = NSFont.systemFont(ofSize: 20, weight: .bold)
 
-        let statusDetailLabel = NSTextField(labelWithString: "Preparing frame server and extension environment…")
-        statusDetailLabel.font = NSFont.systemFont(ofSize: 13, weight: .regular)
-        statusDetailLabel.textColor = .secondaryLabelColor
-        statusDetailLabel.lineBreakMode = .byWordWrapping
-        statusDetailLabel.maximumNumberOfLines = 2
+        let runtimeHelp = NSTextField(labelWithString: "Use this screen while testing. Logs remain scrollable and update live.")
+        runtimeHelp.font = NSFont.systemFont(ofSize: 13, weight: .regular)
+        runtimeHelp.textColor = .secondaryLabelColor
 
         let streamDemandLabel = NSTextField(labelWithString: "Capture demand: unknown")
         streamDemandLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         streamDemandLabel.textColor = .secondaryLabelColor
-
-        let controlsRow = NSStackView()
-        controlsRow.orientation = .horizontal
-        controlsRow.distribution = .fillProportionally
-        controlsRow.spacing = 10
-
-        let enableButton = NSButton(title: "Enable Extension", target: target, action: Selector(("activate:")))
-        enableButton.bezelStyle = .rounded
-        enableButton.controlSize = .large
-
-        let disableButton = NSButton(title: "Disable Extension", target: target, action: Selector(("deactivate:")))
-        disableButton.bezelStyle = .rounded
-        disableButton.controlSize = .large
-
-        let settingsButton = NSButton(title: "Open Settings", target: target, action: Selector(("openExtensionsSettings:")))
-        settingsButton.bezelStyle = .texturedRounded
-        settingsButton.controlSize = .large
-
-        controlsRow.addArrangedSubview(enableButton)
-        controlsRow.addArrangedSubview(disableButton)
-        controlsRow.addArrangedSubview(settingsButton)
-
-        statusStack.addArrangedSubview(statusBadge)
-        statusStack.addArrangedSubview(statusDetailLabel)
-        statusStack.addArrangedSubview(streamDemandLabel)
-        statusStack.addArrangedSubview(controlsRow)
 
         let logsHeader = NSStackView()
         logsHeader.orientation = .horizontal
@@ -301,28 +384,64 @@ final class CameraMainViewBuilder {
 
         logsHeader.addArrangedSubview(logsTitle)
         logsHeader.addArrangedSubview(clearButton)
-        rootStack.addArrangedSubview(logsHeader)
 
         let logScroll = NSScrollView()
         logScroll.hasVerticalScroller = true
-        logScroll.autohidesScrollers = true
+        logScroll.autohidesScrollers = false
+        logScroll.hasHorizontalScroller = false
         logScroll.borderType = .bezelBorder
         logScroll.translatesAutoresizingMaskIntoConstraints = false
-        rootStack.addArrangedSubview(logScroll)
         NSLayoutConstraint.activate([
-            logScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 280),
+            logScroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 360),
         ])
 
         let textView = NSTextView()
         textView.isEditable = false
         textView.isSelectable = true
+        textView.isVerticallyResizable = true
+        textView.isHorizontallyResizable = false
+        textView.autoresizingMask = [.width]
         textView.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .regular)
         textView.textColor = .labelColor
         textView.backgroundColor = NSColor.textBackgroundColor
         textView.string = "Phone AV Bridge Camera initialized.\n"
+        if let textContainer = textView.textContainer {
+            textContainer.containerSize = NSSize(width: 0, height: CGFloat.greatestFiniteMagnitude)
+            textContainer.widthTracksTextView = true
+        }
         logScroll.documentView = textView
 
+        runtimeStack.addArrangedSubview(runtimeTitle)
+        runtimeStack.addArrangedSubview(runtimeHelp)
+        runtimeStack.addArrangedSubview(streamDemandLabel)
+        runtimeStack.addArrangedSubview(logsHeader)
+        runtimeStack.addArrangedSubview(logScroll)
+
+        let wizardNavRow = NSStackView()
+        wizardNavRow.orientation = .horizontal
+        wizardNavRow.alignment = .centerY
+        wizardNavRow.distribution = .equalSpacing
+
+        let wizardBackButton = NSButton(title: "Back", target: target, action: Selector(("previousWizardStep:")))
+        wizardBackButton.bezelStyle = .rounded
+        wizardBackButton.controlSize = .large
+
+        let wizardNextButton = NSButton(title: "Next", target: target, action: Selector(("nextWizardStep:")))
+        wizardNextButton.bezelStyle = .rounded
+        wizardNextButton.controlSize = .large
+
+        wizardNavRow.addArrangedSubview(wizardBackButton)
+        wizardNavRow.addArrangedSubview(wizardNextButton)
+        wizardStack.addArrangedSubview(wizardNavRow)
+
         return CameraMainViewRefs(
+            wizardTabView: wizardTabView,
+            wizardBackButton: wizardBackButton,
+            wizardNextButton: wizardNextButton,
+            stepOneChip: stepOneChip,
+            stepTwoChip: stepTwoChip,
+            stepThreeChip: stepThreeChip,
+            extensionSetupHintLabel: extensionSetupHintLabel,
             statusBadge: statusBadge,
             statusDetailLabel: statusDetailLabel,
             streamDemandLabel: streamDemandLabel,
@@ -346,6 +465,83 @@ final class CameraMainViewBuilder {
             syncResourceButton: syncResourceButton,
             logTextView: textView
         )
+    }
+
+    private static func makeCard() -> NSBox {
+        let card = NSBox()
+        card.boxType = .custom
+        card.cornerRadius = 12
+        card.fillColor = NSColor.controlBackgroundColor
+        card.borderColor = NSColor.separatorColor
+        card.borderWidth = 1
+        card.translatesAutoresizingMaskIntoConstraints = false
+        return card
+    }
+
+    private static func makeStepChip(_ title: String) -> NSTextField {
+        let chip = NSTextField(labelWithString: "  \(title)  ")
+        chip.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        chip.alignment = .center
+        chip.wantsLayer = true
+        chip.layer?.cornerRadius = 8
+        chip.layer?.masksToBounds = true
+        chip.drawsBackground = true
+        chip.backgroundColor = .clear
+        chip.textColor = .white
+        chip.layer?.backgroundColor = NSColor.systemGray.cgColor
+        return chip
+    }
+
+    private static func embedStack(in card: NSBox, spacing: CGFloat) -> NSStackView {
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.spacing = spacing
+        stack.translatesAutoresizingMaskIntoConstraints = false
+
+        if let contentView = card.contentView {
+            contentView.addSubview(stack)
+            NSLayoutConstraint.activate([
+                stack.topAnchor.constraint(equalTo: contentView.topAnchor, constant: 12),
+                stack.leadingAnchor.constraint(equalTo: contentView.leadingAnchor, constant: 12),
+                stack.trailingAnchor.constraint(equalTo: contentView.trailingAnchor, constant: -12),
+                stack.bottomAnchor.constraint(equalTo: contentView.bottomAnchor, constant: -12),
+            ])
+        }
+
+        return stack
+    }
+
+    private static func embedScrollableStack(in container: NSView) -> NSStackView {
+        let scrollView = NSScrollView()
+        scrollView.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.hasVerticalScroller = true
+        scrollView.autohidesScrollers = false
+        scrollView.hasHorizontalScroller = false
+        scrollView.borderType = .noBorder
+        scrollView.drawsBackground = false
+        container.addSubview(scrollView)
+
+        NSLayoutConstraint.activate([
+            scrollView.topAnchor.constraint(equalTo: container.topAnchor),
+            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor),
+            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor),
+            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor),
+        ])
+
+        let stack = NSStackView()
+        stack.orientation = .vertical
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        scrollView.documentView = stack
+
+        NSLayoutConstraint.activate([
+            stack.topAnchor.constraint(equalTo: scrollView.contentView.topAnchor),
+            stack.leadingAnchor.constraint(equalTo: scrollView.contentView.leadingAnchor),
+            stack.trailingAnchor.constraint(equalTo: scrollView.contentView.trailingAnchor),
+            stack.bottomAnchor.constraint(equalTo: scrollView.contentView.bottomAnchor),
+            stack.widthAnchor.constraint(equalTo: scrollView.contentView.widthAnchor),
+        ])
+
+        return stack
     }
 
     private static func makeResourceRow(_ name: String) -> (NSStackView, NSTextField) {

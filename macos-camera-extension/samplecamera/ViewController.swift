@@ -23,6 +23,13 @@ class ViewController: NSViewController {
     private var frameConnection: NWConnection?
     private var latestFrame: Data?
 
+    private var wizardTabView: NSTabView!
+    private var wizardBackButton: NSButton!
+    private var wizardNextButton: NSButton!
+    private var stepOneChip: NSTextField!
+    private var stepTwoChip: NSTextField!
+    private var stepThreeChip: NSTextField!
+    private var extensionSetupHintLabel: NSTextField!
     private var statusBadge: NSTextField!
     private var statusDetailLabel: NSTextField!
     private var streamDemandLabel: NSTextField!
@@ -355,6 +362,33 @@ class ViewController: NSViewController {
         deactivateCamera()
     }
 
+    @objc func previousWizardStep(_ sender: Any?) {
+        guard let tabView = wizardTabView else { return }
+        guard let selected = tabView.selectedTabViewItem else { return }
+        let current = tabView.indexOfTabViewItem(selected)
+        guard current > 0 else { return }
+        tabView.selectTabViewItem(at: current - 1)
+        updateWizardJourney(autoFocus: false)
+    }
+
+    @objc func nextWizardStep(_ sender: Any?) {
+        guard let tabView = wizardTabView else { return }
+        guard let selected = tabView.selectedTabViewItem else { return }
+        let current = tabView.indexOfTabViewItem(selected)
+
+        if current == 0 && !isExtensionStepComplete() {
+            return
+        }
+        if current == 1 && !isPhoneStepComplete() {
+            return
+        }
+
+        if current < tabView.numberOfTabViewItems - 1 {
+            tabView.selectTabViewItem(at: current + 1)
+        }
+        updateWizardJourney(autoFocus: false)
+    }
+
     func registerForDeviceNotifications() {
         NotificationCenter.default.addObserver(forName: NSNotification.Name.AVCaptureDeviceWasConnected, object: nil, queue: nil) { (notif) -> Void in
             // when the user click "activate", we will receive a notification
@@ -392,7 +426,16 @@ class ViewController: NSViewController {
         streamDemandLabel.stringValue = "Capture demand: waiting for client"
         DispatchQueue.main.async {
             self.view.window?.title = "Phone AV Bridge Camera"
-            self.view.window?.minSize = NSSize(width: 900, height: 620)
+            self.view.window?.minSize = NSSize(width: 1000, height: 720)
+            if let window = self.view.window {
+                let desiredSize = NSSize(width: 1180, height: 780)
+                let oversizedWidth: CGFloat = 1500
+                if window.frame.size.width < desiredSize.width ||
+                    window.frame.size.height < desiredSize.height ||
+                    window.frame.size.width > oversizedWidth {
+                    window.setContentSize(desiredSize)
+                }
+            }
             if !self.didSetInitialStatus {
                 self.statusDetailLabel.stringValue = "Keep this app open. Then approve the camera extension once in System Settings."
                 self.didSetInitialStatus = true
@@ -605,6 +648,76 @@ private extension ViewController {
         URL(string: "http://127.0.0.1:8787")!
     }
 
+    func isExtensionStepComplete() -> Bool {
+        let currentStatus = statusBadge?.stringValue.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return sourceStream != nil || currentStatus == "Enabled" || currentStatus == "Streaming"
+    }
+
+    func isPhoneStepComplete() -> Bool {
+        hostBridgeIsRunning && latestHostResourceStatus?.paired == true
+    }
+
+    func updateWizardChip(_ label: NSTextField, title: String, isComplete: Bool, isCurrent: Bool) {
+        label.stringValue = "  \(title)  "
+        label.textColor = .white
+        if isCurrent {
+            label.layer?.backgroundColor = NSColor.systemBlue.cgColor
+        } else if isComplete {
+            label.layer?.backgroundColor = NSColor.systemGreen.cgColor
+        } else {
+            label.layer?.backgroundColor = NSColor.systemGray.cgColor
+        }
+    }
+
+    func updateWizardJourney(autoFocus: Bool) {
+        guard wizardTabView != nil,
+              stepOneChip != nil,
+              stepTwoChip != nil,
+              stepThreeChip != nil,
+              wizardBackButton != nil,
+              wizardNextButton != nil,
+              extensionSetupHintLabel != nil else {
+            return
+        }
+
+        let extensionReady = isExtensionStepComplete()
+        let phoneReady = isPhoneStepComplete()
+
+        if autoFocus {
+            if !extensionReady {
+                wizardTabView.selectTabViewItem(withIdentifier: "wizard-step-extension")
+            } else if !phoneReady {
+                wizardTabView.selectTabViewItem(withIdentifier: "wizard-step-connect")
+            }
+        }
+
+        guard let selectedTab = wizardTabView.selectedTabViewItem else { return }
+        let currentIndex = wizardTabView.indexOfTabViewItem(selectedTab)
+
+        updateWizardChip(stepOneChip, title: "1. Extension", isComplete: extensionReady, isCurrent: currentIndex == 0)
+        updateWizardChip(stepTwoChip, title: "2. Connect Phone", isComplete: phoneReady, isCurrent: currentIndex == 1)
+        updateWizardChip(stepThreeChip, title: "3. Runtime", isComplete: extensionReady && phoneReady, isCurrent: currentIndex == 2)
+
+        wizardBackButton.isEnabled = currentIndex > 0
+        switch currentIndex {
+        case 0:
+            wizardNextButton.title = "Next: Connect Phone"
+            wizardNextButton.isEnabled = extensionReady
+        case 1:
+            wizardNextButton.title = "Next: Runtime"
+            wizardNextButton.isEnabled = phoneReady
+        default:
+            wizardNextButton.title = "Ready"
+            wizardNextButton.isEnabled = false
+        }
+
+        if !extensionReady {
+            extensionSetupHintLabel.stringValue = "1) Click Enable Extension. 2) If prompted by macOS, click Open Settings and approve Camera Extension."
+        } else {
+            extensionSetupHintLabel.stringValue = "Extension ready. Continue to Step 2 to connect your phone."
+        }
+    }
+
     func configureQrCoordinator() {
         let coordinator = QrTokenCoordinator(
             hostBridgeClient: hostBridgeClient,
@@ -693,6 +806,7 @@ private extension ViewController {
                         self.startHostBridge(nil)
                     }
                 }
+                self.updateWizardJourney(autoFocus: true)
             }
         }
     }
@@ -894,6 +1008,7 @@ private extension ViewController {
         syncResourceButton.isEnabled = bridgeOnline
         updateResourceStatusBadge(bridgeOnline ? "Checking" : "Unavailable", color: .systemOrange)
         latestHostResourceStatus = nil
+        updateWizardJourney(autoFocus: true)
     }
 
     private func fetchHostResourceStatus(completion: @escaping (HostResourceStatus?) -> Void) {
@@ -937,6 +1052,7 @@ private extension ViewController {
                 self.cameraOrientationValueLabel.stringValue = self.orientationModeDisplayName(status.cameraOrientationMode)
                 self.updateResourceChipStates(from: status)
                 self.syncResourceButton.isEnabled = true
+                self.updateWizardJourney(autoFocus: true)
             }
         }
     }
@@ -962,6 +1078,13 @@ private extension ViewController {
 
     func configureInterface() {
         let refs = CameraMainViewBuilder().build(in: view, target: self)
+        wizardTabView = refs.wizardTabView
+        wizardBackButton = refs.wizardBackButton
+        wizardNextButton = refs.wizardNextButton
+        stepOneChip = refs.stepOneChip
+        stepTwoChip = refs.stepTwoChip
+        stepThreeChip = refs.stepThreeChip
+        extensionSetupHintLabel = refs.extensionSetupHintLabel
         statusBadge = refs.statusBadge
         statusDetailLabel = refs.statusDetailLabel
         streamDemandLabel = refs.streamDemandLabel
@@ -989,6 +1112,7 @@ private extension ViewController {
         resetQrSection(bridgeOnline: false)
         resetHostResourceSection(bridgeOnline: false)
         updateStatusBadge("Idle", color: .systemOrange)
+        updateWizardJourney(autoFocus: true)
     }
 
     func updateStatusBadge(_ title: String, color: NSColor) {
@@ -996,6 +1120,7 @@ private extension ViewController {
             self.statusBadge.stringValue = "  \(title)  "
             self.statusBadge.textColor = .white
             self.statusBadge.layer?.backgroundColor = color.cgColor
+            self.updateWizardJourney(autoFocus: true)
         }
     }
 
