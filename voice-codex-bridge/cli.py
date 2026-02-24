@@ -15,9 +15,11 @@ import wave
 from dataclasses import dataclass
 from typing import Optional
 
+from audio_capture import AudioCaptureBackend, select_audio_backend
 
-DEFAULT_LANGUAGE = (os.environ.get("STT_LANGUAGE") or os.environ.get("LANG_CODE") or "zh").strip()
-DEFAULT_MODEL = os.environ.get("STT_MODEL", "small")
+
+DEFAULT_LANGUAGE = (os.environ.get("STT_LANGUAGE") or os.environ.get("LANG_CODE") or "en").strip()
+DEFAULT_MODEL = os.environ.get("STT_MODEL", "tiny.en")
 DEFAULT_DEVICE = os.environ.get("STT_DEVICE", "cpu")
 DEFAULT_COMPUTE_TYPE = os.environ.get("STT_COMPUTE_TYPE", "int8")
 DEFAULT_CODEX_CMD = os.environ.get("CODEX_CMD", "codex")
@@ -40,23 +42,6 @@ RECORD_KEY_LABELS = {
     "f8": "F8",
     "f9": "F9",
 }
-
-
-def build_parec_record_command(
-    source: str = DEFAULT_RECORD_SOURCE,
-    sample_rate: int = DEFAULT_SAMPLE_RATE,
-) -> list[str]:
-    return [
-        "parec",
-        "--device",
-        source,
-        "--format",
-        "s16le",
-        "--channels",
-        "1",
-        "--rate",
-        str(sample_rate),
-    ]
 
 
 def normalize_record_key(value: str) -> str:
@@ -108,7 +93,7 @@ def compose_codex_command(command: str, extra_args: list[str]) -> str:
 def normalize_stt_language(language: str) -> str:
     value = (language or "").strip()
     if not value:
-        return "zh"
+        return "en"
     lowered = value.lower().replace("_", "-")
     if lowered in {"zh", "zh-cn", "zh-hans", "cmn-hans-cn"}:
         return "zh"
@@ -195,6 +180,7 @@ class VoiceCodexCliBridge:
         sample_rate: int,
         auto_send: bool,
         record_key: str,
+        audio_backend: AudioCaptureBackend,
     ):
         self.codex_command = codex_command
         self.language = language
@@ -202,6 +188,7 @@ class VoiceCodexCliBridge:
         self.sample_rate = sample_rate
         self.auto_send = auto_send
         self.record_key = normalize_record_key(record_key)
+        self.audio_backend = audio_backend
         self.stt_engine = SttEngine(model=model, device=device, compute_type=compute_type)
 
         self._master_fd: Optional[int] = None
@@ -212,6 +199,7 @@ class VoiceCodexCliBridge:
         self._stdin_pending = bytearray()
         self._transcript_draft = ""
         self._status_message = ""
+        self._resolved_record_source: Optional[str] = None
 
     def run(self) -> int:
         self._ensure_prereqs()
@@ -247,10 +235,7 @@ class VoiceCodexCliBridge:
             self._stop_codex()
 
     def _ensure_prereqs(self) -> None:
-        if shutil.which("parec") is None:
-            raise RuntimeError("parec not found in PATH (install pulseaudio-utils).")
-        if shutil.which("pactl") is None:
-            raise RuntimeError("pactl not found in PATH.")
+        self.audio_backend.ensure_prereqs()
         if shutil.which("bash") is None:
             raise RuntimeError("bash not found in PATH.")
 
@@ -342,10 +327,15 @@ class VoiceCodexCliBridge:
             self._transcribe_and_maybe_send(wav_path)
 
     def _start_recording(self) -> None:
-        source = self._resolve_record_source()
+        if self._resolved_record_source is None:
+            self._resolved_record_source = self.audio_backend.resolve_source(
+                configured_source=self.record_source,
+                sample_rate=self.sample_rate,
+            )
+        source = self._resolved_record_source
         fd, raw_path = tempfile.mkstemp(prefix="voice-codex-", suffix=".raw")
         os.close(fd)
-        cmd = build_parec_record_command(
+        cmd = self.audio_backend.build_record_command(
             source=source,
             sample_rate=self.sample_rate,
         )
@@ -400,80 +390,6 @@ class VoiceCodexCliBridge:
     def _stop_recorder_if_running(self) -> None:
         if self._recorder.process is not None:
             self._stop_recording()
-
-    def _resolve_record_source(self) -> str:
-        if self.record_source:
-            return self.record_source
-        try:
-            result = subprocess.run(
-                ["pactl", "list", "short", "sources"],
-                capture_output=True,
-                text=True,
-                check=False,
-            )
-        except Exception:
-            return "default"
-        if result.returncode != 0:
-            return "default"
-        sources = []
-        for line in result.stdout.splitlines():
-            parts = line.strip().split("\t")
-            if len(parts) < 2:
-                continue
-            sources.append(parts[1].strip())
-        if not sources:
-            return "default"
-
-        def is_monitor(name: str) -> bool:
-            return name.endswith(".monitor")
-
-        preferred_non_monitor = [
-            name for name in sources
-            if not is_monitor(name)
-            and not name.startswith("phone_av_bridge_mic_input_")
-            and not name.startswith("phone_av_bridge_mic_sink_")
-        ]
-        bridge_monitor = [name for name in sources if name.startswith("phone_av_bridge_mic_sink_") and is_monitor(name)]
-        bridge_input = [name for name in sources if name.startswith("phone_av_bridge_mic_input_")]
-        candidates = preferred_non_monitor + bridge_monitor + bridge_input + sources
-        ordered = []
-        for name in candidates:
-            if name not in ordered:
-                ordered.append(name)
-
-        for name in ordered:
-            if self._source_supports_capture(name):
-                return name
-        return ordered[0] if ordered else "default"
-
-    def _source_supports_capture(self, source_name: str) -> bool:
-        fd, probe_path = tempfile.mkstemp(prefix="voice-codex-probe-", suffix=".raw")
-        os.close(fd)
-        try:
-            with open(probe_path, "wb") as output_file:
-                proc = subprocess.Popen(
-                    build_parec_record_command(source=source_name, sample_rate=self.sample_rate),
-                    stdout=output_file,
-                    stderr=subprocess.DEVNULL,
-                    text=False,
-                )
-            try:
-                proc.wait(timeout=0.45)
-            except subprocess.TimeoutExpired:
-                proc.terminate()
-                try:
-                    proc.wait(timeout=0.5)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-            try:
-                return os.path.getsize(probe_path) > 0
-            except OSError:
-                return False
-        finally:
-            try:
-                os.remove(probe_path)
-            except OSError:
-                pass
 
     def _convert_raw_to_wav(self, raw_path: str, wav_path: str) -> None:
         with open(raw_path, "rb") as raw_file, wave.open(wav_path, "wb") as wav_file:
@@ -562,7 +478,11 @@ def parse_args():
     parser.add_argument("--stt-model", dest="model", default=DEFAULT_MODEL, help="STT model name (for faster-whisper).")
     parser.add_argument("--stt-device", dest="device", default=DEFAULT_DEVICE, help="STT device (cpu|auto|cuda).")
     parser.add_argument("--stt-compute-type", dest="compute_type", default=DEFAULT_COMPUTE_TYPE, help="STT compute type.")
-    parser.add_argument("--record-source", default=DEFAULT_RECORD_SOURCE, help="Pulse audio source input.")
+    parser.add_argument(
+        "--record-source",
+        default=DEFAULT_RECORD_SOURCE,
+        help="Audio input source selector (Pulse source on Linux, audio index on macOS).",
+    )
     parser.add_argument("--sample-rate", default=DEFAULT_SAMPLE_RATE, type=int, help="Recording sample rate.")
     parser.add_argument(
         "--no-auto-send",
@@ -593,6 +513,7 @@ def main() -> int:
     if is_help_request(args.codex_args):
         result = subprocess.run(["bash", "-lc", codex_command], check=False)
         return result.returncode
+    audio_backend = select_audio_backend()
     bridge = VoiceCodexCliBridge(
         codex_command=codex_command,
         language=language,
@@ -603,6 +524,7 @@ def main() -> int:
         sample_rate=args.sample_rate,
         auto_send=not args.no_auto_send,
         record_key=args.record_key,
+        audio_backend=audio_backend,
     )
     try:
         return bridge.run()

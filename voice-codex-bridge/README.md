@@ -1,6 +1,6 @@
 # Voice to Codex PTY Bridge (CLI)
 
-Local app that records microphone audio, transcribes it with a small STT model, and sends text to a Codex process via PTY stdin.
+Local app that records microphone audio, transcribes it with a small local STT model, and sends text to a Codex process via PTY stdin.
 
 ## Why PTY
 
@@ -17,7 +17,7 @@ This app launches Codex in its own PTY so text injection is deterministic (much 
 - Vosk offline models (very small footprints, lower quality for general dictation).
   - Source: https://alphacephei.com/vosk/models
 
-Default in this MVP: `small` + `zh` (better Mandarin recognition with acceptable local latency).
+Default in this MVP: `tiny.en` + `en` (fastest local latency on lower-end machines).
 
 ## Quick start (CLI only)
 
@@ -28,11 +28,18 @@ cd voice-codex-bridge
 ```
 
 `voice-codex` now auto-creates `./.venv` and installs missing Python dependencies on first run.
-`./install.sh` also creates `./.voice-codex.env` on first run with defaults `STT_MODEL=small` and `STT_LANGUAGE=zh`.
+`./install.sh` also creates `./.voice-codex.env` on first run with defaults `STT_MODEL=tiny.en` and `STT_LANGUAGE=en`.
+The scripts auto-select a supported Python interpreter (`3.9` to `3.13`, preferring `3.11`).
+Override interpreter selection with `VOICE_CODEX_PYTHON` if needed.
+
+Platform recording dependencies:
+- Linux/WSL: `pactl` + `parec` (`pulseaudio-utils`).
+- macOS: `ffmpeg` (`brew install ffmpeg`).
+
 Manual setup is still supported:
 
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -79,7 +86,9 @@ Optional flags:
 - `--record-key f8` or `--record-key f9` for easy non-typing hotkeys.
 - `--record-key ctrl-x` (default) or `--record-key ctrl-r` for keyboard chord hotkeys.
 - `--record-key enter` uses Enter as start/stop recording key.
-- `--record-source <pulse-source>` selects non-default audio source.
+- `--record-source <source>` selects non-default audio source.
+  - Linux/WSL: Pulse source name (from `pactl list short sources`)
+  - macOS: avfoundation audio index (for example `0`, `1`, ...).
 - `--stt-model tiny|base|small|...` chooses STT model.
 
 Forward full Codex startup args without changing your usual command style:
@@ -112,16 +121,19 @@ python3 -m unittest discover -s tests -v
 
 ## Environment variables
 
-- `STT_MODEL` default: `small`
-- `STT_LANGUAGE` default: `zh`
+- `STT_MODEL` default: `tiny.en`
+- `STT_LANGUAGE` default: `en`
 - `LANG_CODE` optional compatibility alias for `STT_LANGUAGE` (for external configs).
 - `STT_DEVICE` default: `cpu`
 - `STT_COMPUTE_TYPE` default: `int8`
 - `CODEX_CMD` default: `codex`
-- `VOICE_CODEX_RECORD_SOURCE` optional: force Pulse source name used by CLI recorder.
+- `VOICE_CODEX_RECORD_SOURCE` optional: force recorder source (Pulse source on Linux/WSL, avfoundation index on macOS).
 - `VOICE_CODEX_RECORD_KEY` optional: `ctrl-x` (default), `ctrl-r`, `f8`, `f9`, or `enter`.
+- `VOICE_CODEX_PYTHON` optional: override Python command used for venv/bootstrap.
+- `VOICE_CODEX_MACOS_AUDIO_INDEX` optional: default macOS audio index when source is not provided (default `0`).
 
 If `LANG_CODE`/`STT_LANGUAGE` is Chinese (`zh*`) and model is accidentally set to English-only (`*.en`), the CLI auto-switches to `small`.
+If you want better Mandarin recognition, set `STT_LANGUAGE=zh` and `STT_MODEL=small` in `.voice-codex.env`.
 
 ## Notes
 
@@ -134,5 +146,8 @@ If `LANG_CODE`/`STT_LANGUAGE` is Chinese (`zh*`) and model is accidentally set t
   - old CLI versions used ffmpeg Pulse input, which is unsupported on some ffmpeg builds.
   - use the updated CLI (now records with `parec` and writes WAV safely).
 - If transcript stays empty:
-  - run `pactl list short sources` and pick a source manually:
+  - Linux/WSL: run `pactl list short sources` and pick a source manually:
     - `python3 cli.py --record-source <source-name>`
+  - macOS: list avfoundation devices, pick the audio index, then pass it:
+    - `ffmpeg -hide_banner -f avfoundation -list_devices true -i \"\"`
+    - `python3 cli.py --record-source <audio-index>`

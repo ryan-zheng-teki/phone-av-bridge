@@ -19,11 +19,9 @@ class VoiceCodexCliHelperTests(unittest.TestCase):
     def setUpClass(cls):
         cls.cli = load_cli_module()
 
-    def test_build_parec_record_command_uses_expected_flags(self):
-        cmd = self.cli.build_parec_record_command(
-            source="default",
-            sample_rate=16000,
-        )
+    def test_build_linux_record_command_uses_expected_flags(self):
+        backend = self.cli.select_audio_backend("linux")
+        cmd = backend.build_record_command(source="default", sample_rate=16000)
         self.assertEqual(
             cmd,
             [
@@ -38,6 +36,39 @@ class VoiceCodexCliHelperTests(unittest.TestCase):
                 "16000",
             ],
         )
+
+    def test_build_macos_record_command_uses_expected_flags(self):
+        backend = self.cli.select_audio_backend("darwin")
+        cmd = backend.build_record_command(source="1", sample_rate=16000)
+        self.assertEqual(
+            cmd,
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-f",
+                "avfoundation",
+                "-i",
+                ":1",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-f",
+                "s16le",
+                "-acodec",
+                "pcm_s16le",
+                "-",
+            ],
+        )
+
+    def test_select_audio_backend_by_platform(self):
+        self.assertEqual(self.cli.select_audio_backend("linux").backend_name, "linux-pulse")
+        self.assertEqual(self.cli.select_audio_backend("darwin").backend_name, "macos-avfoundation")
+        with self.assertRaises(RuntimeError):
+            self.cli.select_audio_backend("windows")
 
     def test_record_hotkey_is_ctrl_r(self):
         self.assertEqual(self.cli.CTRL_R_HOTKEY_BYTE, 0x12)
@@ -80,6 +111,7 @@ class VoiceCodexCliHelperTests(unittest.TestCase):
         self.assertIsNone(notice)
 
     def test_transcript_draft_accumulates(self):
+        backend = self.cli.select_audio_backend("linux")
         bridge = self.cli.VoiceCodexCliBridge(
             codex_command="cat",
             language="en",
@@ -90,6 +122,7 @@ class VoiceCodexCliHelperTests(unittest.TestCase):
             sample_rate=16000,
             auto_send=False,
             record_key="ctrl-x",
+            audio_backend=backend,
         )
         self.assertEqual(bridge._append_transcript_draft("hello"), "hello")
         self.assertEqual(bridge._append_transcript_draft("world"), "hello world")
@@ -97,6 +130,8 @@ class VoiceCodexCliHelperTests(unittest.TestCase):
         self.assertEqual(bridge._append_transcript_draft(" again"), "hello world again")
 
     def test_auto_send_appends_multiple_transcripts_without_enter(self):
+        backend = self.cli.select_audio_backend("linux")
+
         class FakeStt:
             def __init__(self):
                 self._items = ["first chunk", "second chunk"]
@@ -115,6 +150,7 @@ class VoiceCodexCliHelperTests(unittest.TestCase):
             sample_rate=16000,
             auto_send=True,
             record_key="ctrl-x",
+            audio_backend=backend,
         )
         bridge.stt_engine = FakeStt()
 

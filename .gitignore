@@ -79,6 +79,7 @@ tmp_cameraextension_baseline/
 
 # Voice Codex bridge local env artifacts
 voice-codex-bridge/.venv/
+voice-codex-bridge/.voice-codex.env
 **/__pycache__/
 *.pyc
 
