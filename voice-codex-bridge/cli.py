@@ -243,7 +243,7 @@ class VoiceCodexCliBridge:
         master_fd, slave_fd = pty.openpty()
         self._master_fd = master_fd
         self._proc = subprocess.Popen(
-            ["bash", "-lc", self.codex_command],
+            ["bash", "-c", self.codex_command],
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
@@ -511,7 +511,7 @@ def main() -> int:
         sys.stderr.write(f"[voice-codex] {stt_notice}\n")
     codex_command = compose_codex_command(args.command, args.codex_args)
     if is_help_request(args.codex_args):
-        result = subprocess.run(["bash", "-lc", codex_command], check=False)
+        result = subprocess.run(["bash", "-c", codex_command], check=False)
         return result.returncode
     audio_backend = select_audio_backend()
     bridge = VoiceCodexCliBridge(
