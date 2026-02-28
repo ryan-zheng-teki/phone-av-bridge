@@ -1,0 +1,6 @@
+.venv/
+.voice-gemini.env
+__pycache__/
+*.raw
+*.wav
+test_hotkey.py

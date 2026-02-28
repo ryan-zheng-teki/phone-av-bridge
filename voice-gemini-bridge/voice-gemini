@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_PATH="$(readlink -f "${BASH_SOURCE[0]}")"
+SCRIPT_DIR="$(cd "$(dirname "${SCRIPT_PATH}")" && pwd)"
+REQUIREMENTS_FILE="${SCRIPT_DIR}/requirements.txt"
+VENV_DIR="${SCRIPT_DIR}/.venv"
+VENV_PYTHON="${VENV_DIR}/bin/python3"
+ENV_FILE="${SCRIPT_DIR}/.voice-gemini.env"
+MIN_PY_MINOR=9
+MAX_PY_MINOR=13
+
+is_supported_python() {
+  local cmd="$1"
+  "${cmd}" - <<PY >/dev/null 2>&1
+import sys
+ok = (sys.version_info.major == 3 and ${MIN_PY_MINOR} <= sys.version_info.minor <= ${MAX_PY_MINOR})
+raise SystemExit(0 if ok else 1)
+PY
+}
+
+select_python_cmd() {
+  local candidates=()
+  if [[ -n "${VOICE_GEMINI_PYTHON:-}" ]]; then
+    candidates+=("${VOICE_GEMINI_PYTHON}")
+  fi
+  candidates+=(python3.11 python3.12 python3.13 python3.10 python3.9 python3)
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if ! command -v "${candidate}" >/dev/null 2>&1; then
+      continue
+    fi
+    if is_supported_python "${candidate}"; then
+      printf '%s\n' "${candidate}"
+      return 0
+    fi
+  done
+  return 1
+}
+
+ensure_local_venv() {
+  if [[ -x "${VENV_PYTHON}" ]] && is_supported_python "${VENV_PYTHON}"; then
+    return
+  fi
+
+  if [[ -x "${VENV_PYTHON}" ]]; then
+    echo "[voice-gemini] existing .venv python is unsupported; recreating with Python 3.${MIN_PY_MINOR}-3.${MAX_PY_MINOR}." >&2
+    rm -rf "${VENV_DIR}"
+  fi
+
+  if ! PYTHON_CMD="$(select_python_cmd)"; then
+    echo "[voice-gemini] no supported Python found. Install Python 3.${MIN_PY_MINOR}-3.${MAX_PY_MINOR} or set VOICE_GEMINI_PYTHON." >&2
+    exit 1
+  fi
+
+  echo "[voice-gemini] creating local virtualenv at ${VENV_DIR} using ${PYTHON_CMD}" >&2
+  "${PYTHON_CMD}" -m venv "${VENV_DIR}"
+}
+
+ensure_python_deps() {
+  if "${VENV_PYTHON}" - <<'PY' >/dev/null 2>&1
+import importlib.util
+required_modules = ("faster_whisper", "requests")
+missing = [name for name in required_modules if importlib.util.find_spec(name) is None]
+raise SystemExit(0 if not missing else 1)
+PY
+  then
+    return
+  fi
+
+  echo "[voice-gemini] installing Python dependencies..." >&2
+  "${VENV_PYTHON}" -m pip install -r "${REQUIREMENTS_FILE}"
+}
+
+load_voice_defaults() {
+  if [[ -f "${ENV_FILE}" ]]; then
+    set -a
+    # shellcheck source=/dev/null
+    source "${ENV_FILE}"
+    set +a
+  fi
+
+  if [[ -z "${STT_LANGUAGE:-}" && -n "${LANG_CODE:-}" ]]; then
+    STT_LANGUAGE="${LANG_CODE}"
+  fi
+
+  : "${STT_LANGUAGE:=en}"
+  : "${STT_MODEL:=tiny.en}"
+
+  lang_lower="$(printf '%s' "${STT_LANGUAGE}" | tr '[:upper:]' '[:lower:]')"
+  if [[ "${lang_lower}" == zh* && "${STT_MODEL}" == *.en ]]; then
+    STT_MODEL="small"
+  fi
+
+  export STT_LANGUAGE STT_MODEL
+}
+
+ensure_local_venv
+ensure_python_deps
+load_voice_defaults
+
+exec "${VENV_PYTHON}" "${SCRIPT_DIR}/cli.py" "$@"

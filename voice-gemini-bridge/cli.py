@@ -1,0 +1,562 @@
+#!/usr/bin/env python3
+import argparse
+import fcntl
+import os
+import pty
+import select
+import shlex
+import shutil
+import signal
+import struct
+import subprocess
+import sys
+import tempfile
+import termios
+import tty
+import wave
+from dataclasses import dataclass
+from typing import Optional
+
+from audio_capture import AudioCaptureBackend, select_audio_backend
+
+
+DEFAULT_LANGUAGE = (os.environ.get("STT_LANGUAGE") or os.environ.get("LANG_CODE") or "en").strip()
+DEFAULT_MODEL = os.environ.get("STT_MODEL", "tiny.en")
+DEFAULT_DEVICE = os.environ.get("STT_DEVICE", "cpu")
+DEFAULT_COMPUTE_TYPE = os.environ.get("STT_COMPUTE_TYPE", "int8")
+DEFAULT_GEMINI_CMD = os.environ.get("GEMINI_CMD", "gemini")
+DEFAULT_RECORD_SOURCE = os.environ.get("VOICE_GEMINI_RECORD_SOURCE", "").strip()
+DEFAULT_SAMPLE_RATE = int(os.environ.get("VOICE_GEMINI_SAMPLE_RATE", "16000"))
+DEFAULT_RECORD_KEY = os.environ.get("VOICE_GEMINI_RECORD_KEY", "ctrl-g").strip().lower()
+
+CTRL_G_HOTKEY_BYTE = 0x07
+CTRL_R_HOTKEY_BYTE = 0x12
+CTRL_X_HOTKEY_BYTE = 0x18
+ENTER_HOTKEY_BYTES = {0x0D, 0x0A}
+RECORD_KEY_SEQUENCES = {
+    "f8": [b"\x1b[19~"],
+    "f9": [b"\x1b[20~"],
+}
+RECORD_KEY_CHOICES = {"ctrl-g", "ctrl-r", "ctrl-x", "enter", "f8", "f9"}
+RECORD_KEY_LABELS = {
+    "ctrl-g": "Ctrl+G",
+    "ctrl-r": "Ctrl+R",
+    "ctrl-x": "Ctrl+X",
+    "enter": "Enter",
+    "f8": "F8",
+    "f9": "F9",
+}
+
+
+def normalize_record_key(value: str) -> str:
+    normalized = (value or "").strip().lower()
+    if normalized in RECORD_KEY_CHOICES:
+        return normalized
+    return "ctrl-g"
+
+
+def record_key_matches(byte: int, record_key: str) -> bool:
+    key = normalize_record_key(record_key)
+    if key == "enter":
+        return byte in ENTER_HOTKEY_BYTES
+    if key == "ctrl-x":
+        return byte == CTRL_X_HOTKEY_BYTE
+    if key == "ctrl-g":
+        return byte == CTRL_G_HOTKEY_BYTE
+    return byte == CTRL_R_HOTKEY_BYTE
+
+
+def record_key_sequence_matches(payload: bytes, record_key: str) -> int:
+    key = normalize_record_key(record_key)
+    if key in {"ctrl-g", "ctrl-r", "ctrl-x", "enter"}:
+        if not payload:
+            return 0
+        return 1 if record_key_matches(payload[0], key) else 0
+    for seq in RECORD_KEY_SEQUENCES.get(key, []):
+        if payload.startswith(seq):
+            return len(seq)
+    return 0
+
+
+def record_key_sequence_is_partial(payload: bytes, record_key: str) -> bool:
+    key = normalize_record_key(record_key)
+    if key in {"ctrl-g", "ctrl-r", "ctrl-x", "enter"}:
+        return False
+    for seq in RECORD_KEY_SEQUENCES.get(key, []):
+        if seq.startswith(payload):
+            return True
+    return False
+
+
+def compose_gemini_command(command: str, extra_args: list[str]) -> str:
+    base = (command or "").strip() or DEFAULT_GEMINI_CMD
+    remainder = [item for item in (extra_args or []) if item and item != "--"]
+    if not remainder:
+        return base
+    return f"{base} {shlex.join(remainder)}"
+
+
+def normalize_stt_language(language: str) -> str:
+    value = (language or "").strip()
+    if not value:
+        return "en"
+    lowered = value.lower().replace("_", "-")
+    if lowered in {"zh", "zh-cn", "zh-hans", "cmn-hans-cn"}:
+        return "zh"
+    return value
+
+
+def resolve_stt_profile(language: str, model: str) -> tuple[str, str, Optional[str]]:
+    resolved_language = normalize_stt_language(language)
+    resolved_model = (model or "").strip() or DEFAULT_MODEL
+    notice: Optional[str] = None
+
+    # `.en` Whisper checkpoints are English-only; force multilingual model for Chinese.
+    if resolved_language.lower().startswith("zh") and resolved_model.lower().endswith(".en"):
+        notice = (
+            f"stt model '{resolved_model}' is English-only for language "
+            f"'{resolved_language}'; switching to 'small'."
+        )
+        resolved_model = "small"
+
+    return resolved_language, resolved_model, notice
+
+
+@dataclass
+class RecorderState:
+    process: Optional[subprocess.Popen] = None
+    raw_path: Optional[str] = None
+
+
+class SttEngine:
+    def __init__(self, model: str, device: str, compute_type: str):
+        self.model_name = model
+        self.device = device
+        self.compute_type = compute_type
+        self._model = None
+
+    def _ensure_model(self):
+        if self._model is not None:
+            return self._model
+        try:
+            from faster_whisper import WhisperModel
+        except ImportError as error:
+            raise RuntimeError(
+                "faster-whisper is not installed. Run: pip install -r requirements.txt"
+            ) from error
+        try:
+            self._model = WhisperModel(
+                self.model_name,
+                device=self.device,
+                compute_type=self.compute_type,
+            )
+        except Exception as error:
+            if self.device.lower() == "auto" and "libcublas" in str(error).lower():
+                self._model = WhisperModel(
+                    self.model_name,
+                    device="cpu",
+                    compute_type="int8",
+                )
+            else:
+                raise
+        return self._model
+
+    def transcribe_file(self, wav_path: str, language: str) -> str:
+        model = self._ensure_model()
+        segments, _info = model.transcribe(
+            wav_path,
+            language=language,
+            vad_filter=True,
+            beam_size=1,
+            condition_on_previous_text=False,
+        )
+        parts = [segment.text.strip() for segment in segments if segment.text and segment.text.strip()]
+        return " ".join(parts).strip()
+
+
+class VoiceGeminiCliBridge:
+    def __init__(
+        self,
+        gemini_command: str,
+        language: str,
+        model: str,
+        device: str,
+        compute_type: str,
+        record_source: str,
+        sample_rate: int,
+        auto_send: bool,
+        record_key: str,
+        audio_backend: AudioCaptureBackend,
+    ):
+        self.gemini_command = gemini_command
+        self.language = language
+        self.record_source = record_source
+        self.sample_rate = sample_rate
+        self.auto_send = auto_send
+        self.record_key = normalize_record_key(record_key)
+        self.audio_backend = audio_backend
+        self.stt_engine = SttEngine(model=model, device=device, compute_type=compute_type)
+
+        self._master_fd: Optional[int] = None
+        self._proc: Optional[subprocess.Popen] = None
+        self._recorder = RecorderState()
+        self._stdin_fd = sys.stdin.fileno()
+        self._old_term = None
+        self._stdin_pending = bytearray()
+        self._transcript_draft = ""
+        self._status_message = ""
+        self._resolved_record_source: Optional[str] = None
+
+    def run(self) -> int:
+        self._ensure_prereqs()
+        self._start_gemini()
+        self._sync_winsize()
+        self._enable_raw_stdin()
+
+        # Handle terminal resize
+        def sigwinch_handler(signum, frame):
+            self._sync_winsize()
+
+        signal.signal(signal.SIGWINCH, sigwinch_handler)
+
+        key_label = RECORD_KEY_LABELS.get(self.record_key, "Ctrl+G")
+        self._print_status(f"voice mode ready: press {key_label} to start/stop recording.")
+        if self.auto_send:
+            self._print_status("auto-send is enabled.")
+        else:
+            self._print_status("auto-send is disabled; transcript is printed only.")
+        if self.record_key == "enter":
+            self._print_status("warning: Enter is intercepted for voice toggle and will not submit normal prompts.")
+
+        try:
+            while True:
+                if self._proc is None or self._master_fd is None:
+                    return 1
+                if self._proc.poll() is not None:
+                    return self._proc.returncode or 0
+
+                readable, _, _ = select.select([self._stdin_fd, self._master_fd], [], [], 0.05)
+                for fd in readable:
+                    if fd == self._master_fd:
+                        self._pump_gemini_output()
+                    elif fd == self._stdin_fd:
+                        self._handle_stdin_bytes()
+        finally:
+            signal.signal(signal.SIGWINCH, signal.SIG_DFL)
+            self._clear_status()
+            self._restore_stdin()
+            self._stop_recorder_if_running()
+            self._stop_gemini()
+
+    def _sync_winsize(self) -> None:
+        if self._master_fd is None:
+            return
+        try:
+            # Get current terminal size
+            size = fcntl.ioctl(self._stdin_fd, termios.TIOCGWINSZ, struct.pack("HHHH", 0, 0, 0, 0))
+            # Set PTY size
+            fcntl.ioctl(self._master_fd, termios.TIOCSWINSZ, size)
+        except Exception:
+            pass
+
+    def _ensure_prereqs(self) -> None:
+        self.audio_backend.ensure_prereqs()
+        if shutil.which("bash") is None:
+            raise RuntimeError("bash not found in PATH.")
+
+    def _start_gemini(self) -> None:
+        master_fd, slave_fd = pty.openpty()
+        self._master_fd = master_fd
+        self._proc = subprocess.Popen(
+            ["bash", "-c", self.gemini_command],
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            close_fds=True,
+            text=False,
+            env=os.environ.copy(),
+        )
+        os.close(slave_fd)
+
+    def _stop_gemini(self) -> None:
+        if self._proc is not None and self._proc.poll() is None:
+            try:
+                self._proc.terminate()
+                self._proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                self._proc.kill()
+        self._proc = None
+        if self._master_fd is not None:
+            try:
+                os.close(self._master_fd)
+            except OSError:
+                pass
+        self._master_fd = None
+
+    def _enable_raw_stdin(self) -> None:
+        if self._old_term is None:
+            self._old_term = termios.tcgetattr(self._stdin_fd)
+            tty.setraw(self._stdin_fd)
+
+    def _restore_stdin(self) -> None:
+        if self._old_term is not None:
+            termios.tcsetattr(self._stdin_fd, termios.TCSADRAIN, self._old_term)
+            self._old_term = None
+
+    def _pump_gemini_output(self) -> None:
+        if self._master_fd is None:
+            return
+        try:
+            chunk = os.read(self._master_fd, 4096)
+        except OSError:
+            return
+        if not chunk:
+            return
+        os.write(sys.stdout.fileno(), chunk)
+
+    def _handle_stdin_bytes(self) -> None:
+        data = os.read(self._stdin_fd, 1024)
+        if not data or self._master_fd is None:
+            return
+        self._stdin_pending.extend(data)
+        forward = bytearray()
+
+        while self._stdin_pending:
+            consumed = record_key_sequence_matches(bytes(self._stdin_pending), self.record_key)
+            if consumed > 0:
+                self._toggle_recording()
+                del self._stdin_pending[:consumed]
+                continue
+
+            if record_key_sequence_is_partial(bytes(self._stdin_pending), self.record_key):
+                break
+
+            forward.append(self._stdin_pending[0])
+            del self._stdin_pending[0]
+
+        if forward:
+            if self.record_key != "enter" and any(
+                key in forward for key in (0x0D, 0x0A)
+            ):
+                self._transcript_draft = ""
+            os.write(self._master_fd, bytes(forward))
+
+    def _toggle_recording(self) -> None:
+        if self._recorder.process is None:
+            self._start_recording()
+        else:
+            wav_path = self._stop_recording()
+            if not wav_path:
+                self._print_status("recording stop failed.")
+                return
+            self._transcribe_and_maybe_send(wav_path)
+
+    def _start_recording(self) -> None:
+        if self._resolved_record_source is None:
+            self._resolved_record_source = self.audio_backend.resolve_source(
+                configured_source=self.record_source,
+                sample_rate=self.sample_rate,
+            )
+        source = self._resolved_record_source
+        fd, raw_path = tempfile.mkstemp(prefix="voice-gemini-", suffix=".raw")
+        os.close(fd)
+        cmd = self.audio_backend.build_record_command(
+            source=source,
+            sample_rate=self.sample_rate,
+        )
+        output_file = open(raw_path, "wb")
+        proc = subprocess.Popen(cmd, stdout=output_file, stderr=subprocess.PIPE, text=False)
+        output_file.close()
+        self._recorder = RecorderState(process=proc, raw_path=raw_path)
+        key_label = RECORD_KEY_LABELS.get(self.record_key, "Ctrl+G")
+        self._print_status(f"recording started from source '{source}' ({key_label} to stop).")
+
+    def _stop_recording(self) -> Optional[str]:
+        process = self._recorder.process
+        raw_path = self._recorder.raw_path
+        self._recorder = RecorderState()
+        if process is None or raw_path is None:
+            return None
+        try:
+            process.send_signal(signal.SIGTERM)
+            process.wait(timeout=2)
+        except subprocess.TimeoutExpired:
+            process.kill()
+            process.wait(timeout=1)
+
+        stderr_text = ""
+        if process.stderr is not None:
+            try:
+                stderr_text = process.stderr.read().decode("utf-8", errors="ignore").strip()
+            except Exception:
+                stderr_text = ""
+
+        try:
+            raw_size = os.path.getsize(raw_path)
+        except OSError:
+            return None
+        if raw_size <= 0:
+            try:
+                os.remove(raw_path)
+            except OSError:
+                pass
+            if stderr_text:
+                self._print_status(f"recorder error: {stderr_text}")
+            return None
+
+        wav_path = raw_path[:-4] + ".wav"
+        self._convert_raw_to_wav(raw_path=raw_path, wav_path=wav_path)
+        try:
+            os.remove(raw_path)
+        except OSError:
+            pass
+        return wav_path
+
+    def _stop_recorder_if_running(self) -> None:
+        if self._recorder.process is not None:
+            self._stop_recording()
+
+    def _convert_raw_to_wav(self, raw_path: str, wav_path: str) -> None:
+        with open(raw_path, "rb") as raw_file, wave.open(wav_path, "wb") as wav_file:
+            wav_file.setnchannels(1)
+            wav_file.setsampwidth(2)
+            wav_file.setframerate(self.sample_rate)
+            while True:
+                chunk = raw_file.read(8192)
+                if not chunk:
+                    break
+                wav_file.writeframes(chunk)
+
+    def _transcribe_and_maybe_send(self, wav_path: str) -> None:
+        try:
+            self._print_status("transcribing...")
+            text = self.stt_engine.transcribe_file(wav_path=wav_path, language=self.language)
+        except Exception as error:
+            self._print_status(f"transcribe failed: {error}")
+            return
+        finally:
+            try:
+                os.remove(wav_path)
+            except OSError:
+                pass
+
+        if not text:
+            self._print_status("no speech detected.")
+            return
+        self._append_transcript_draft(text)
+        self._print_status("transcript updated.")
+
+        if self.auto_send and self._master_fd is not None:
+            os.write(self._master_fd, (text + " ").encode("utf-8", errors="ignore"))
+            self._print_status("appended to gemini draft; press Enter to send.")
+
+    def _append_transcript_draft(self, text: str) -> str:
+        incoming = (text or "").strip()
+        if not incoming:
+            return self._transcript_draft
+        if self._transcript_draft:
+            self._transcript_draft = f"{self._transcript_draft} {incoming}"
+        else:
+            self._transcript_draft = incoming
+        return self._transcript_draft
+
+    def _print_status(self, message: str) -> None:
+        text = f"[voice-gemini] {message}".replace("\r", " ").replace("\n", " ")
+        self._status_message = text
+        self._render_status_overlay(text)
+
+    def _clear_status(self) -> None:
+        self._status_message = ""
+        self._render_status_overlay("")
+
+    def _render_status_overlay(self, text: str) -> None:
+        if not sys.stdout.isatty():
+            if text:
+                sys.stdout.write(f"\r\n{text}\r\n")
+                sys.stdout.flush()
+            return
+        try:
+            cols, rows = shutil.get_terminal_size(fallback=(120, 30))
+            clipped = text[: max(0, cols - 1)]
+            payload = (
+                "\x1b7"
+                f"\x1b[{rows};1H"
+                "\x1b[2K"
+                f"{clipped}"
+                "\x1b8"
+            )
+            os.write(sys.stdout.fileno(), payload.encode("utf-8", errors="ignore"))
+        except Exception:
+            if text:
+                sys.stdout.write(f"\r\n{text}\r\n")
+                sys.stdout.flush()
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description="Run Gemini in PTY with voice hotkey support.",
+        add_help=False,
+    )
+    parser.add_argument("--command", default=DEFAULT_GEMINI_CMD, help="Command used to start Gemini.")
+    parser.add_argument("--stt-language", dest="language", default=DEFAULT_LANGUAGE, help="STT language code.")
+    parser.add_argument("--lang-code", dest="language", default=argparse.SUPPRESS, help="Alias for --stt-language.")
+    parser.add_argument("--stt-model", dest="model", default=DEFAULT_MODEL, help="STT model name (for faster-whisper).")
+    parser.add_argument("--stt-device", dest="device", default=DEFAULT_DEVICE, help="STT device (cpu|auto|cuda).")
+    parser.add_argument("--stt-compute-type", dest="compute_type", default=DEFAULT_COMPUTE_TYPE, help="STT compute type.")
+    parser.add_argument(
+        "--record-source",
+        default=DEFAULT_RECORD_SOURCE,
+        help="Audio input source selector (Pulse source on Linux, audio index on macOS).",
+    )
+    parser.add_argument("--sample-rate", default=DEFAULT_SAMPLE_RATE, type=int, help="Recording sample rate.")
+    parser.add_argument(
+        "--no-auto-send",
+        action="store_true",
+        help="Do not auto-send transcript to Gemini; print transcript only.",
+    )
+    parser.add_argument(
+        "--record-key",
+        choices=sorted(RECORD_KEY_CHOICES),
+        default=normalize_record_key(DEFAULT_RECORD_KEY),
+        help="Hotkey used to start/stop recording.",
+    )
+    args, unknown = parser.parse_known_args()
+    args.gemini_args = unknown
+    return args
+
+
+def is_help_request(args: list[str]) -> bool:
+    return "-h" in args or "--help" in args
+
+
+def main() -> int:
+    args = parse_args()
+    language, model, stt_notice = resolve_stt_profile(language=args.language, model=args.model)
+    if stt_notice:
+        sys.stderr.write(f"[voice-gemini] {stt_notice}\n")
+    gemini_command = compose_gemini_command(args.command, args.gemini_args)
+    if is_help_request(args.gemini_args):
+        result = subprocess.run(["bash", "-c", gemini_command], check=False)
+        return result.returncode
+    audio_backend = select_audio_backend()
+    bridge = VoiceGeminiCliBridge(
+        gemini_command=gemini_command,
+        language=language,
+        model=model,
+        device=args.device,
+        compute_type=args.compute_type,
+        record_source=args.record_source,
+        sample_rate=args.sample_rate,
+        auto_send=not args.no_auto_send,
+        record_key=args.record_key,
+        audio_backend=audio_backend,
+    )
+    try:
+        return bridge.run()
+    except RuntimeError as error:
+        sys.stderr.write(f"voice-gemini error: {error}\n")
+        return 2
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

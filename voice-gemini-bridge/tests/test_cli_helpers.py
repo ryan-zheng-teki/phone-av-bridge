@@ -1,0 +1,182 @@
+import importlib.util
+import os
+import tempfile
+import unittest
+from pathlib import Path
+
+
+def load_cli_module():
+    module_path = Path(__file__).resolve().parents[1] / "cli.py"
+    spec = importlib.util.spec_from_file_location("voice_gemini_bridge_cli", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
+
+
+class VoiceGeminiCliHelperTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.cli = load_cli_module()
+
+    def test_build_linux_record_command_uses_expected_flags(self):
+        backend = self.cli.select_audio_backend("linux")
+        cmd = backend.build_record_command(source="default", sample_rate=16000)
+        self.assertEqual(
+            cmd,
+            [
+                "parec",
+                "--device",
+                "default",
+                "--format",
+                "s16le",
+                "--channels",
+                "1",
+                "--rate",
+                "16000",
+            ],
+        )
+
+    def test_build_macos_record_command_uses_expected_flags(self):
+        backend = self.cli.select_audio_backend("darwin")
+        cmd = backend.build_record_command(source="1", sample_rate=16000)
+        self.assertEqual(
+            cmd,
+            [
+                "ffmpeg",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-nostdin",
+                "-f",
+                "avfoundation",
+                "-i",
+                ":1",
+                "-ac",
+                "1",
+                "-ar",
+                "16000",
+                "-f",
+                "s16le",
+                "-acodec",
+                "pcm_s16le",
+                "-",
+            ],
+        )
+
+    def test_select_audio_backend_by_platform(self):
+        self.assertEqual(self.cli.select_audio_backend("linux").backend_name, "linux-pulse")
+        self.assertEqual(self.cli.select_audio_backend("darwin").backend_name, "macos-avfoundation")
+        with self.assertRaises(RuntimeError):
+            self.cli.select_audio_backend("windows")
+
+    def test_record_hotkey_is_ctrl_g(self):
+        self.assertEqual(self.cli.CTRL_G_HOTKEY_BYTE, 0x07)
+        self.assertTrue(self.cli.record_key_matches(0x07, "ctrl-g"))
+        self.assertFalse(self.cli.record_key_matches(0x0D, "ctrl-g"))
+        self.assertEqual(self.cli.CTRL_X_HOTKEY_BYTE, 0x18)
+        self.assertTrue(self.cli.record_key_matches(0x18, "ctrl-x"))
+        self.assertFalse(self.cli.record_key_matches(0x07, "ctrl-x"))
+        self.assertEqual(self.cli.record_key_sequence_matches(b"\x07", "ctrl-g"), 1)
+
+    def test_enter_hotkey_mode(self):
+        self.assertEqual(self.cli.normalize_record_key("enter"), "enter")
+        self.assertTrue(self.cli.record_key_matches(0x0D, "enter"))
+        self.assertTrue(self.cli.record_key_matches(0x0A, "enter"))
+        self.assertFalse(self.cli.record_key_matches(0x07, "enter"))
+        self.assertEqual(self.cli.record_key_sequence_matches(b"\r", "enter"), 1)
+        self.assertEqual(self.cli.record_key_sequence_matches(b"\n", "enter"), 1)
+
+    def test_compose_gemini_command_with_forwarded_args(self):
+        command = self.cli.compose_gemini_command("gemini", ["--", "--model", "gemini-2.0-flash", "--yolo"])
+        self.assertEqual(command, "gemini --model gemini-2.0-flash --yolo")
+
+    def test_function_key_hotkey_sequences(self):
+        self.assertEqual(self.cli.normalize_record_key("f8"), "f8")
+        self.assertEqual(self.cli.record_key_sequence_matches(b"\x1b[19~", "f8"), 5)
+        self.assertEqual(self.cli.record_key_sequence_matches(b"\x1b[20~", "f9"), 5)
+        self.assertTrue(self.cli.record_key_sequence_is_partial(b"\x1b[1", "f8"))
+        self.assertFalse(self.cli.record_key_sequence_is_partial(b"\x1b[A", "f8"))
+
+    def test_resolve_stt_profile_switches_english_only_model_for_zh(self):
+        language, model, notice = self.cli.resolve_stt_profile(language="zh", model="tiny.en")
+        self.assertEqual(language, "zh")
+        self.assertEqual(model, "small")
+        self.assertIsNotNone(notice)
+
+    def test_resolve_stt_profile_keeps_multilingual_model_for_zh(self):
+        language, model, notice = self.cli.resolve_stt_profile(language="zh_cn", model="base")
+        self.assertEqual(language, "zh")
+        self.assertEqual(model, "base")
+        self.assertIsNone(notice)
+
+    def test_transcript_draft_accumulates(self):
+        backend = self.cli.select_audio_backend("linux")
+        bridge = self.cli.VoiceGeminiCliBridge(
+            gemini_command="cat",
+            language="en",
+            model="tiny.en",
+            device="cpu",
+            compute_type="int8",
+            record_source="",
+            sample_rate=16000,
+            auto_send=False,
+            record_key="ctrl-g",
+            audio_backend=backend,
+        )
+        self.assertEqual(bridge._append_transcript_draft("hello"), "hello")
+        self.assertEqual(bridge._append_transcript_draft("world"), "hello world")
+        self.assertEqual(bridge._append_transcript_draft(""), "hello world")
+        self.assertEqual(bridge._append_transcript_draft(" again"), "hello world again")
+
+    def test_auto_send_appends_multiple_transcripts_without_enter(self):
+        backend = self.cli.select_audio_backend("linux")
+
+        class FakeStt:
+            def __init__(self):
+                self._items = ["first chunk", "second chunk"]
+
+            def transcribe_file(self, wav_path: str, language: str) -> str:
+                _ = (wav_path, language)
+                return self._items.pop(0)
+
+        bridge = self.cli.VoiceGeminiCliBridge(
+            gemini_command="cat",
+            language="en",
+            model="tiny.en",
+            device="cpu",
+            compute_type="int8",
+            record_source="",
+            sample_rate=16000,
+            auto_send=True,
+            record_key="ctrl-g",
+            audio_backend=backend,
+        )
+        bridge.stt_engine = FakeStt()
+
+        read_fd, write_fd = os.pipe()
+        bridge._master_fd = write_fd
+        try:
+            tmp1 = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            tmp1.close()
+            tmp2 = tempfile.NamedTemporaryFile(delete=False, suffix=".wav")
+            tmp2.close()
+
+            bridge._transcribe_and_maybe_send(tmp1.name)
+            bridge._transcribe_and_maybe_send(tmp2.name)
+
+            os.close(write_fd)
+            payload = os.read(read_fd, 1024).decode("utf-8", errors="ignore")
+        finally:
+            os.close(read_fd)
+            try:
+                os.close(write_fd)
+            except OSError:
+                pass
+
+        self.assertEqual(payload, "first chunk second chunk ")
+        self.assertEqual(bridge._transcript_draft, "first chunk second chunk")
+
+
+if __name__ == "__main__":
+    unittest.main()
